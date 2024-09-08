@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenTopoData Service
+After=network.target
+
+[Service]
+ExecStart=/bin/bash -c 'cd /home/charm/data/opentopodata && make build && make run'
+Restart=always
+RestartSec=10
+User=charm
+WorkingDirectory=/home/charm/data/opentopodata
+
+[Install]
+WantedBy=multi-user.target
