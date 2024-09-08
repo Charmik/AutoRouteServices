@@ -2,11 +2,26 @@
 set -ex
 
 
-services=("opentopodata.service" "autoroute.service")
+#services=("opentopodata.service" "autoroute.service")
+services=("autoroute.service")
 
 cd /home/charm/data
-git clone https://github.com/Charmik/opentopodata
-mv aster30m opentopodata/data
+
+if [ ! -d "opentopodata" ]; then
+  git clone https://github.com/Charmik/opentopodata
+  cd opentopodata
+else
+  cd opentopodata
+  git pull
+fi
+
+if [ ! -d "data/aster30m" ]; then
+  echo "aster30m doesn't exist so copy it from data dir"
+  mv aster30m data
+else
+  echo "aster30m" exists
+fi
+
 cd /home/charm/data/AutoRouteServices
 
 # Iterate over the array and print each service
