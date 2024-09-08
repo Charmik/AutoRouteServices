@@ -1,0 +1,13 @@
+[Unit]
+Description=Valhalla Service
+After=network.target
+
+[Service]
+ExecStart=sudo -H -u charm /bin/bash -c 'cd /home/charm/data/docker-valhalla && docker compose up --build'
+Restart=always
+RestartSec=10
+User=charm
+WorkingDirectory=/home/charm/data/docker-valhalla
+
+[Install]
+WantedBy=multi-user.target
