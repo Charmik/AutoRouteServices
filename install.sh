@@ -6,11 +6,12 @@ services=("opentopodata.service" "autoroute.service")
 
 cd /home/charm/data
 git clone https://github.com/Charmik/opentopodata
+#mv aster30m opentopodata/data
 cd /home/charm/data/AutoRouteServices
 
 # Iterate over the array and print each service
 for service in "${services[@]}"; do
-    cp $service /etc/systemd/system/"$service"
+    sudo cp $service /etc/systemd/system/"$service"
     sudo systemctl daemon-reload
     sudo systemctl enable "$service"
     sudo systemctl start "$service"
