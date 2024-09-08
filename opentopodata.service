@@ -3,7 +3,7 @@ Description=OpenTopoData Service
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c 'cd /home/charm/data/opentopodata && make build && make run'
+ExecStart=sudo -H -u charm /bin/bash -c 'cd /home/charm/data/opentopodata && make build && make run-systemd'
 Restart=always
 RestartSec=10
 User=charm
