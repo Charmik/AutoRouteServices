@@ -20,6 +20,9 @@ else
   echo "aster30m" exists
 fi
 
+cd /home/charm/data
+mkdir -p AutoRoute
+
 cd /home/charm/data/AutoRouteServices
 
 # Iterate over the array and print each service
