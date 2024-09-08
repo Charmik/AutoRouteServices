@@ -4,6 +4,11 @@ set -ex
 
 services=("opentopodata.service" "autoroute.service")
 
+cd /home/charm/data
+rm -rf opentopodata
+git clone https://github.com/Charmik/opentopodata
+cd /home/charm/data/AutoRouteServices
+
 # Iterate over the array and print each service
 for service in "${services[@]}"; do
     cp $service /etc/systemd/system/"$service"
