@@ -1,0 +1,23 @@
+version: '3.0'
+services:
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: valhalla_latest_build
+    ports:
+      - 8003:8003
+    volumes:
+      - ~/data/valhalla_new:/custom_files
+    environment:
+      - tile_urls=https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+      - server_threads=8  # determines how many threads will be used to run the valhalla server
+      - serve_tiles=True  # If True, starts the service. If false, stops after building the graph.
+      - use_tiles_ignore_pbf=True  # load existing valhalla_tiles.tar directly
+      - tileset_name=valhalla_tiles  # name of the resulting graph on disk
+      - build_elevation=False  # build elevation with "True" or "Force": will download only the elevation for areas covered by the graph tiles
+      - build_admins=False  # build admins db with "True" or "Force"
+      - build_time_zones=False  # build timezone db with "True" or "Force"
+      - build_transit=False  # build transit, needs existing GTFS directories mapped to /gtfs_feeds
+      - build_tar=True  # build an indexed tar file from the tile_dir for faster graph loading times
+      - force_rebuild=False  # forces a rebuild of the routing tiles with "True"
+      - update_existing_config=True  # if there are new config entries in the default config, add them to the existing config
+
