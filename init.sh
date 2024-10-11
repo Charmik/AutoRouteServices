@@ -29,7 +29,9 @@ sudo apt-get update
 sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl start docker
 sudo usermod -aG docker $USER
+set +e
 newgrp docker
+set -e
 sudo docker run hello-world
 
 # Valhalla
@@ -40,6 +42,7 @@ cp ~/data/AutoRouteServices/valhalla/docker-compose.yml .
 cp ~/data/AutoRouteServices/valhalla/docker-compose-build.yml .
 ulimit -n 65536
 # docker compose -f docker-compose.yml up --build
+# docker compose -f docker-compose-build.yml up --build
 
 # OpenTopoData
 cd ~/data
