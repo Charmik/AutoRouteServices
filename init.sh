@@ -29,28 +29,31 @@ sudo apt-get update
 sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl start docker
 sudo usermod -aG docker $USER
-set +e
-newgrp docker
-set -e
 sudo docker run hello-world
 
 # Valhalla
 cd ~/data
-git clone https://github.com/gis-ops/docker-valhalla
-cd docker-valhalla
-cp ~/data/AutoRouteServices/valhalla/docker-compose.yml .
-cp ~/data/AutoRouteServices/valhalla/docker-compose-build.yml .
-ulimit -n 65536
+if [ ! -d "docker-valhalla" ]; then
+  git clone https://github.com/gis-ops/docker-valhalla
+fi
+  cd docker-valhalla
+  git pull
+  cp ~/data/AutoRouteServices/valhalla/docker-compose.yml .
+  cp ~/data/AutoRouteServices/valhalla/docker-compose-build.yml .
+  ulimit -n 65536
 # docker compose -f docker-compose.yml up --build
 # docker compose -f docker-compose-build.yml up --build
 
 # OpenTopoData
 cd ~/data
-git clone https://github.com/Charmik/opentopodata
+if [ ! -d "opentopodata" ]; then
+  git clone https://github.com/Charmik/opentopodata
+fi
 cd opentopodata
+git pull
 sudo make build
 cd data
-mkdir aster30m
+mkdir -p aster30m
 cd aster30m
 wget -r -np -nH --cut-dirs=3 -R "index.html*" -N -P . http://autoroute.shop/opentopodata/data/aster30m/
 # make run
