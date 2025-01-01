@@ -2,7 +2,7 @@
 set -ex
 
 
-services=("opentopodata.service" "autoroute.service" "valhalla.service")
+services=("opentopodata.service" "autoroute.service" "valhalla.service" "photon.service")
 
 #copy opentopodata project & aster30m
 cd /home/charm/data
@@ -18,6 +18,16 @@ if [ ! -d "data/aster30m" ]; then
   mv aster30m data
 else
   echo "aster30m" exists
+fi
+
+if [ ! -d "photon" ]; then
+  git clone https://github.com/komoot/photon
+  cd photon
+  sudo apt-get install bzip2 pbzip2
+  wget -O - https://download1.graphhopper.com/public/photon-db-latest.tar.bz2 | pbzip2 -cd | tar x
+else
+  cd photon
+  git pull
 fi
 
 cd /home/charm/data
