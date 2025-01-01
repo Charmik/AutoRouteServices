@@ -27,6 +27,7 @@ if [ ! -d "photon" ]; then
   cd photon
   sudo apt-get install bzip2 pbzip2
   wget -O - https://download1.graphhopper.com/public/photon-db-latest.tar.bz2 | pbzip2 -cd | tar x
+  ./gradlew app:es_embedded:build
 else
   cd photon
   git pull
