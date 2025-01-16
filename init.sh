@@ -7,7 +7,7 @@ set -ex
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -y
 sudo apt-get -y install openssh-client openssh-server
-sudo apt-get -y install vim tmux maven tmux git postgresql xfsprogs lsof rsyslog snapd python3-pip pipx jq aha gdal-bin libgdal-dev
+sudo apt-get -y install vim tmux maven tmux git postgresql xfsprogs lsof rsyslog snapd python3-pip pipx jq aha gdal-bin libgdal-dev tree
 
 # Setup PostgreSQL database without interaction
 sudo -i -u postgres psql << EOF
@@ -57,3 +57,6 @@ mkdir -p aster30m
 cd aster30m
 wget -r -np -nH --cut-dirs=3 -R "index.html*" -N -P . http://autoroute.shop/opentopodata/data/aster30m/
 # make run
+
+
+# add AutoRoute: app.config && config/cool_tags.txt
