@@ -14,7 +14,7 @@ ExecStart=/bin/bash -c 'cd /home/charm/disk/opentopodata && make build && docker
 ExecStop=/usr/bin/docker stop $(docker ps -q --filter ancestor=opentopodata:1.9.0)
 Restart=always
 RestartSec=10
-StandardOutput=null
+#StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target

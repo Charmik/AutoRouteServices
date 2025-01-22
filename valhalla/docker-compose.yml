@@ -6,7 +6,7 @@ services:
     ports:
       - 8002:8002
     volumes:
-      - ~/data/valhalla:/custom_files
+      - ~/disk/valhalla:/custom_files
     environment:
       - tile_urls=https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
       - server_threads=16  # determines how many threads will be used to run the valhalla server

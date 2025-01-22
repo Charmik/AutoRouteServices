@@ -15,7 +15,7 @@ ExecStop=/bin/bash -c 'cd /home/charm/disk/docker-valhalla && docker compose dow
 Restart=always
 RestartSec=10
 User=charm
-StandardOutput=null
+#StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target
