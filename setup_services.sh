@@ -5,7 +5,7 @@ set -ex
 services=("opentopodata.service" "autoroute.service" "valhalla.service" "photon.service")
 
 #copy opentopodata project & aster30m
-cd /home/charm/data
+cd /home/charm/disk
 if [ ! -d "opentopodata" ]; then
   git clone https://github.com/Charmik/opentopodata
   cd opentopodata

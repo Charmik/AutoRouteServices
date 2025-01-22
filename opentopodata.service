@@ -3,12 +3,18 @@ Description=OpenTopoData Service
 After=network.target
 
 [Service]
-ExecStart=sudo -H -u charm /bin/bash -c 'cd /home/charm/data/opentopodata && make build && make run-systemd'
+SuccessExitStatus=143
+
+User=charm
+Group=charm
+Type=simple
+
+WorkingDirectory=/home/charm/disk/opentopodata
+ExecStart=/bin/bash -c 'cd /home/charm/disk/opentopodata && make build && docker-compose up --build'
 ExecStop=/usr/bin/docker stop $(docker ps -q --filter ancestor=opentopodata:1.9.0)
 Restart=always
 RestartSec=10
-User=charm
-WorkingDirectory=/home/charm/data/opentopodata
+StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target

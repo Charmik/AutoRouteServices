@@ -3,11 +3,19 @@ Description=Valhalla Service
 After=network.target
 
 [Service]
-ExecStart=sudo -H -u charm /bin/bash -c 'cd /home/charm/data/docker-valhalla && docker compose up --build'
+SuccessExitStatus=143
+
+User=charm
+Group=charm
+Type=simple
+
+WorkingDirectory=/home/charm/disk/docker-valhalla
+ExecStart=/bin/bash -c 'cd /home/charm/disk/docker-valhalla && docker compose up --build'
+ExecStop=/bin/bash -c 'cd /home/charm/disk/docker-valhalla && docker compose down'
 Restart=always
 RestartSec=10
 User=charm
-WorkingDirectory=/home/charm/data/docker-valhalla
+StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target

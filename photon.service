@@ -15,7 +15,6 @@ ExecStart=java $JAVA_OPTIONS -jar target/photon-0.6.0.jar -cors-any -data-dir .
 ExecStop=/bin/kill -15 $MAINPID
 Restart=always
 RestartSec=3
-
 StandardOutput=null
 
 [Install]
