@@ -7,7 +7,7 @@ Requires=docker.service
 User=charm
 Group=charm
 
-ExecStart=/usr/bin/docker run --rm -p 8003:5000 -v /home/charm/data/osrm:/data --name osrm-backend ghcr.io/project-osrm/osrm-backend osrm-routed --mmap --algorithm mld /data/merged.osrm
+ExecStart=/usr/bin/docker run --rm -p 8003:5000 -v /home/charm/data/osrm:/data --name osrm-backend ghcr.io/project-osrm/osrm-backend osrm-routed --mmap --algorithm mld /data/planet-latest.osrm
 ExecStop=/usr/bin/docker stop osrm-backend
 WorkingDirectory=/home/charm/data/osrm
 
