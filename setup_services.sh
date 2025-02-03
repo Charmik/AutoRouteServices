@@ -2,7 +2,7 @@
 set -ex
 
 
-services=("opentopodata.service" "autoroute.service" "valhalla.service" "photon.service")
+services=("opentopodata.service" "autoroute.service" "osrm.service" "photon.service")
 
 #copy opentopodata project & aster30m
 cd /home/charm/disk

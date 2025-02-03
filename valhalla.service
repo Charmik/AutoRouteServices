@@ -10,12 +10,12 @@ Group=charm
 Type=simple
 
 WorkingDirectory=/home/charm/disk/docker-valhalla
+ExecStartPre=/usr/bin/docker rm -f valhalla_latest || true
 ExecStart=/bin/bash -c 'cd /home/charm/disk/docker-valhalla && docker compose up --build'
 ExecStop=/bin/bash -c 'cd /home/charm/disk/docker-valhalla && docker compose down'
 Restart=always
 RestartSec=10
 User=charm
-#StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=OSRM Routing Engine
+After=docker.service
+Requires=docker.service
+
+[Service]
+User=charm
+Group=charm
+
+ExecStart=/usr/bin/docker run --rm -p 8003:5000 -v /home/charm/data/osrm:/data --name osrm-backend ghcr.io/project-osrm/osrm-backend osrm-routed --mmap --algorithm mld /data/merged.osrm
+ExecStop=/usr/bin/docker stop osrm-backend
+WorkingDirectory=/home/charm/data/osrm
+
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
