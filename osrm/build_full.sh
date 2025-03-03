@@ -13,3 +13,4 @@ docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-cust
 date
 sudo chmod 644 planet-latest.osrm.fileIndex
 telegram-send "Finished osrm build $(hostname)"
+rm planet-latest.osm.pbf
