@@ -2,23 +2,23 @@
 set -ex
 
 
-services=("opentopodata.service" "autoroute.service" "osrm.service" "photon.service")
+services=("autoroute.service" "osrm.service" "photon.service")
 
 #copy opentopodata project & aster30m
-cd /home/charm/disk
-if [ ! -d "opentopodata" ]; then
-  git clone https://github.com/Charmik/opentopodata
-  cd opentopodata
-else
-  cd opentopodata
-  git pull
-fi
-if [ ! -d "data/aster30m" ]; then
-  echo "aster30m doesn't exist so copy it from data dir"
-  mv aster30m data
-else
-  echo "aster30m" exists
-fi
+#cd /home/charm/disk
+#if [ ! -d "opentopodata" ]; then
+#  git clone https://github.com/Charmik/opentopodata
+#  cd opentopodata
+#else
+#  cd opentopodata
+#  git pull
+#fi
+#if [ ! -d "data/aster30m" ]; then
+#  echo "aster30m doesn't exist so copy it from data dir"
+#  mv aster30m data
+#else
+#  echo "aster30m" exists
+#fi
 
 cd /home/charm/data
 if [ ! -d "photon" ]; then
