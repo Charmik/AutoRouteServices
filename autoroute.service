@@ -10,7 +10,8 @@ Group=charm
 Type=simple
 
 WorkingDirectory=/home/charm/data/AutoRoute
-Environment="JAVA_OPTIONS=-ea -XX:MaxRAMPercentage=50 -XX:+UseParallelGC -Xlog:gc*:file=logs/gc.log -XX:+HeapDumpOnOutOfMemoryError -XX:NativeMemoryTracking=summary -XX:GCTimeLimit=20 -XX:-OmitStackTraceInFastThrow"
+# make -ea depends on the prod/testing
+Environment="JAVA_OPTIONS=-XX:MaxRAMPercentage=50 -XX:+UseParallelGC -Xlog:gc*:file=logs/gc.log -XX:+HeapDumpOnOutOfMemoryError -XX:NativeMemoryTracking=summary -XX:GCTimeLimit=20 -XX:-OmitStackTraceInFastThrow"
 ExecStart=java $JAVA_OPTIONS -jar AutoRoute.jar app.property.file=/home/charm/data/AutoRoute/app.properties
 # ExecStart=/home/charm/.sdkman/candidates/java/21.0.2-open/bin/java $JAVA_OPTIONS -jar AutoRoute.jar app.property.file=/home/charm/data/AutoRoute/app.properties
 ExecStop=/bin/kill -15 $MAINPID
