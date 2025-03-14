@@ -217,6 +217,11 @@ function setup()
     },
 
     tracktype_speeds = {
+      grade1 = default_speed,  -- Default speed for grade1
+      grade2 = 0,   -- Speed 0 for grade2 (avoid)
+      grade3 = 0,   -- Speed 0 for grade3 (avoid)
+      grade4 = 0,   -- Speed 0 for grade4 (avoid)
+      grade5 = 0    -- Speed 0 for grade5 (avoid)
     },
 
     smoothness_speeds = {
@@ -319,6 +324,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.cycleway_right = way:get_value_by_key("cycleway:right")
   data.duration = way:get_value_by_key("duration")
   data.service = way:get_value_by_key("service")
+  data.tracktype = way:get_value_by_key("tracktype")
   data.foot = way:get_value_by_key("foot")
   data.foot_forward = way:get_value_by_key("foot:forward")
   data.foot_backward = way:get_value_by_key("foot:backward")
@@ -358,6 +364,7 @@ function speed_handler(profile,way,result,data)
   --DEBUG: if way:id() == 442985813 then
   -- speed
   local bridge_speed = profile.bridge_speeds[data.bridge]
+  local tracktype = data.tracktype
   if (data.highway == "track" or data.highway == "unclassified") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
@@ -368,6 +375,10 @@ function speed_handler(profile,way,result,data)
     end
     result.forward_speed = bridge_speed
     result.backward_speed = bridge_speed
+    data.way_type_allows_pushing = true
+  elseif tracktype and profile.tracktype_speeds[tracktype] then
+    result.forward_speed = profile.tracktype_speeds[tracktype]
+    result.backward_speed = profile.tracktype_speeds[tracktype]
     data.way_type_allows_pushing = true
   elseif profile.route_speeds[data.route] then
     -- ferries (doesn't cover routes tagged using relations)
