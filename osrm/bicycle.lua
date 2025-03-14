@@ -160,7 +160,7 @@ function setup()
     },
 
     platform_speeds = {
-      platform = walking_speed
+      platform = 0;
     },
 
     amenity_speeds = {
@@ -336,7 +336,7 @@ function handle_bicycle_tags(profile,way,result,data)
 
   cycleway_handler(profile,way,result,data)
 
-  bike_push_handler(profile,way,result,data)
+--   bike_push_handler(profile,way,result,data)
 
   -- width should be after bike_push
   width_handler(profile,way,result,data)
@@ -384,12 +384,12 @@ function speed_handler(profile,way,result,data)
     -- ferries (doesn't cover routes tagged using relations)
     result.forward_mode = mode.ferry
     result.backward_mode = mode.ferry
-    if data.duration and durationIsValid(data.duration) then
-      result.duration = math.max( 1, parseDuration(data.duration) )
-    else
-       result.forward_speed = profile.route_speeds[data.route]
-       result.backward_speed = profile.route_speeds[data.route]
-    end
+--     if data.duration and durationIsValid(data.duration) then
+--       result.duration = math.max( 1, parseDuration(data.duration) )
+--     else
+--        result.forward_speed = profile.route_speeds[data.route]
+--        result.backward_speed = profile.route_speeds[data.route]
+--     end
   -- railway platforms (old tagging scheme)
   elseif data.railway and profile.platform_speeds[data.railway] then
     result.forward_speed = profile.platform_speeds[data.railway]
