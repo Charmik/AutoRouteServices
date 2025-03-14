@@ -11,6 +11,6 @@ docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extr
 docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/planet-latest.osrm || echo "osrm-partition failed"
 docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/planet-latest.osrm || echo "osrm-customize failed"
 date
-sudo chmod 644 planet-latest.osrm.fileIndex
 telegram-send "Finished osrm build $(hostname)"
 rm planet-latest.osm.pbf
+sudo chmod 644 planet-latest.osrm.fileIndex
