@@ -57,8 +57,8 @@ RESPONSE=$(curl -s -X POST "http://65.21.97.107:7070/api/v1/generateRoutes" \
      -d "{
        \"lat\": $LAT,
        \"lon\": $LON,
-       \"min_distance\": 30,
-       \"max_distance\": 60,
+       \"min_distance\": 29,
+       \"max_distance\": 59,
        \"generation_mode\": \"basic_roads\",
        \"generation_params\": {}
      }")
