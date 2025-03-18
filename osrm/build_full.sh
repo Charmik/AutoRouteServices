@@ -1,6 +1,6 @@
 date
 telegram-send "Started osrm build $(hostname)"
-cd ~/data
+cd ~/disk
 rm -rf osrm_full
 mkdir osrm_full
 cd osrm_full
