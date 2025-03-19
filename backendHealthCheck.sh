@@ -71,11 +71,20 @@ checkLocation() {
 
   # Send first request to generate routes
   log "Sending route generation request..."
+
+  # Fix for negative coordinates formatting in JSON
+  # Ensure negative numbers are properly formatted with leading zero
+  local JSON_LON=$ACTUAL_LON
+  if [[ $JSON_LON == -* && $JSON_LON != -0* ]]; then
+    # Replace "-." with "-0." for proper JSON formatting
+    JSON_LON=$(echo $JSON_LON | sed 's/-\./-0\./g')
+  fi
+
   RESPONSE=$(curl -s -X POST "http://65.21.97.107:7070/api/v1/generateRoutes" \
        -H "Content-Type: application/json" \
        -d "{
          \"lat\": $ACTUAL_LAT,
-         \"lon\": $ACTUAL_LON,
+         \"lon\": $JSON_LON,
          \"min_distance\": $MIN_DISTANCE,
          \"max_distance\": $MAX_DISTANCE,
          \"generation_mode\": \"sights\",
