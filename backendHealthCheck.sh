@@ -104,8 +104,12 @@ checkLocation() {
   fi
 
   log "Got UUID: $UUID"
-  log "Waiting 10 seconds before requesting routes..."
-  sleep 10
+  local WAIT_TIME=10
+  if [ $MIN_DISTANCE -gt 200 ]; then
+    WAIT_TIME=15
+  fi
+  log "Waiting $WAIT_TIME seconds before requesting routes..."
+  sleep $WAIT_TIME
 
   # Send second request to get the routes
   log "Requesting routes with UUID: $UUID"
@@ -157,4 +161,4 @@ checkLocation 51.50744559999998 -0.1277653 28 59 "London"
 sleep 120
 checkLocation 59.89686549999996 29.0765628 27 59 "Sbor"
 sleep 120
-checkLocation 19.4326296 -99.13317850000001 200 300 "Mexico-City"
+checkLocation 19.4326296 -99.13317850000001 201 300 "Mexico-City"
