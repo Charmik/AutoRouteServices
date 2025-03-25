@@ -104,7 +104,7 @@ checkLocation() {
   fi
 
   log "Got UUID: $UUID"
-  local WAIT_TIME=10
+  local WAIT_TIME=15
   if [ $MIN_DISTANCE -gt 200 ]; then
     WAIT_TIME=15
   fi
