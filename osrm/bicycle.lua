@@ -139,7 +139,7 @@ function setup()
       unclassified = 0,
       living_street = default_speed,
       road = default_speed,
-      service = default_speed,
+      service = 0,
       track = 0,
       path = 0
     },
