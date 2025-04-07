@@ -141,7 +141,8 @@ function setup()
       road = default_speed,
       service = 0,
       track = 0,
-      path = 0
+      path = 0,
+      footway = 0
     },
 
     pedestrian_speeds = {
