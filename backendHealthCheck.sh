@@ -106,7 +106,7 @@ checkLocation() {
   log "Got UUID: $UUID"
   local WAIT_TIME=15
   if [ $MIN_DISTANCE -gt 200 ]; then
-    WAIT_TIME=15
+    WAIT_TIME=20
   fi
   log "Waiting $WAIT_TIME seconds before requesting routes..."
   sleep $WAIT_TIME
