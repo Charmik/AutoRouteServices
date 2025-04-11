@@ -369,6 +369,9 @@ function speed_handler(profile,way,result,data)
   if (data.highway == "track" or data.highway == "unclassified") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
+  elseif (data.highway == "unclassified" and data.maxspeed >= 40 and data.maxspeed < 100) then
+    result.forward_speed = profile.default_speed
+    result.backward_speed = profile.default_speed
   elseif (bridge_speed and bridge_speed > 0) then
     data.highway = data.bridge
     if data.duration and durationIsValid(data.duration) then
