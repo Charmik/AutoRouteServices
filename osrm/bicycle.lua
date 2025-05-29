@@ -136,13 +136,13 @@ function setup()
       tertiary = default_speed,
       tertiary_link = default_speed,
       residential = default_speed,
-      unclassified = 0,
       living_street = default_speed,
       road = default_speed,
-      service = 0,
-      track = 0,
-      path = 0,
-      footway = 0
+      unclassified = 0.01,
+      service = 0.01,
+      track = 0.01,
+      path = 0.01,
+      footway = 0.01
     },
 
     pedestrian_speeds = {
