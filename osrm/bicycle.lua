@@ -98,7 +98,7 @@ function setup()
     },
 
     cycleway_tags = Set {
-      'track',
+--       'track',
       'lane',
       'share_busway',
       'sharrow',
@@ -116,6 +116,7 @@ function setup()
     -- only used for cyclability metric
     unsafe_highway_list = {
       primary = 0.5,
+      trunk = 0.5,
       secondary = 0.65,
       tertiary = 0.8,
       primary_link = 0.5,
@@ -128,21 +129,22 @@ function setup()
     },
 
     bicycle_speeds = {
-      cycleway = default_speed,
-      primary = default_speed,
-      primary_link = default_speed,
-      secondary = default_speed,
-      secondary_link = default_speed,
-      tertiary = default_speed,
-      tertiary_link = default_speed,
-      residential = default_speed,
-      living_street = default_speed,
-      road = default_speed,
-      unclassified = 0.01,
-      service = 0.01,
-      track = 0.01,
-      path = 0.01,
-      footway = 0.01
+      cycleway = default_speed, --2mil
+      primary = default_speed, --3.8mil
+      trunk = default_speed, --1.8mil
+      primary_link = default_speed, --469k
+      secondary = default_speed, --5.4mil
+      secondary_link = default_speed, --366k
+      tertiary = default_speed, --8.5mil
+      tertiary_link = default_speed, --267k
+      residential = default_speed, --68mil
+      living_street = default_speed, --2.2 mil
+      road = default_speed, --43k
+      unclassified = 0.01, --18mil TODO: remove with bad surface?
+      service = 1,         --60 mil TODO: try with good surface
+      track = 0.01,        --28 mil
+      path = 0,            --15mil
+      footway = 0          --27 mil
     },
 
     pedestrian_speeds = {
@@ -218,7 +220,8 @@ function setup()
     },
 
     tracktype_speeds = {
-      grade1 = default_speed,  -- Default speed for grade1
+--       grade1 = default_speed,  -- Default speed for grade1
+      grade1 = 0.01,
       grade2 = 0,   -- Speed 0 for grade2 (avoid)
       grade3 = 0,   -- Speed 0 for grade3 (avoid)
       grade4 = 0,   -- Speed 0 for grade4 (avoid)
@@ -366,7 +369,7 @@ function speed_handler(profile,way,result,data)
   -- speed
   local bridge_speed = profile.bridge_speeds[data.bridge]
   local tracktype = data.tracktype
-  if (data.highway == "track" or data.highway == "unclassified") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
+  if (data.highway == "track" or data.highway == "unclassified" or data.highway == "path") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
   elseif (data.highway == "unclassified" and data.maxspeed >= 40 and data.maxspeed < 100) then
@@ -456,7 +459,8 @@ function cycleway_handler(profile,way,result,data)
   -- cycleway
   data.has_cycleway_forward = false
   data.has_cycleway_backward = false
-  data.is_twoway = result.forward_mode ~= mode.inaccessible and result.backward_mode ~= mode.inaccessible and not data.implied_oneway
+--data.is_twoway = result.forward_mode ~= mode.inaccessible and result.backward_mode ~= mode.inaccessible and not data.implied_oneway https://github.com/Project-OSRM/osrm-backend/issues/7138
+  data.is_twoway = data.forward_mode ~= mode.inaccessible and data.backward_mode ~= mode.inaccessible and not data.implied_oneway
 
   -- cycleways on normal roads
   if data.is_twoway then
