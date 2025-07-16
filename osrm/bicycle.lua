@@ -14,6 +14,15 @@ function setup()
   local default_speed = 25
   local walking_speed = 1
 
+  mode = {
+      inaccessible = 0,
+      cycling = 1,
+      pushing_bike = 2,
+      ferry = 3,
+      train = 4,
+      highway_cycling = 5,
+    }
+
   return {
     properties = {
       u_turn_penalty                = 20,
@@ -41,7 +50,8 @@ function setup()
 
     allowed_start_modes = Set {
       mode.cycling,
-      mode.pushing_bike
+      mode.pushing_bike,
+      mode.highway_cycling
     },
 
     barrier_blacklist = Set {
@@ -129,10 +139,11 @@ function setup()
     },
 
     bicycle_speeds = {
-      cycleway = default_speed, --2mil
+      cycleway = default_speed * 1.2, --2mil
       primary = default_speed, --3.8mil
-      trunk = default_speed, --1.8mil
-      primary_link = default_speed, --469k
+      trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
+      trunk_link = default_speed,
+      primary_link = 1, --469k
       secondary = default_speed, --5.4mil
       secondary_link = default_speed, --366k
       tertiary = default_speed, --8.5mil
@@ -229,6 +240,14 @@ function setup()
     },
 
     smoothness_speeds = {
+      excellent = default_speed,
+      good = default_speed,
+      intermediate = default_speed,
+      bad = 0,
+      very_bad = 0,
+      horrible = 0,
+      very_horrible = 0,
+      impassable = 0
     },
 
     avoid = Set {
@@ -289,6 +308,23 @@ function process_node(profile, node, result)
   result.traffic_lights = TrafficSignal.get_value(node)
 end
 
+local function parse_maxspeed(way)
+    local max_speed = way:get_value_by_key ("maxspeed")
+    local max_speed_type = way:get_value_by_key ("maxspeed:type")
+
+    if (max_speed and string.match(max_speed, "^%w%w:urban$")) then
+        return 50
+    elseif (max_speed_type and string.match(max_speed_type, "^%w%w:urban$")) then
+        return 50
+    elseif (max_speed and string.match(max_speed, "^%w%w:rural$")) then
+        return 101
+    elseif (max_speed_type and string.match(max_speed_type, "^%w%w:rural$")) then
+        return 101
+    else
+        return Measure.get_max_speed(max_speed) or 0
+    end
+end
+
 function handle_bicycle_tags(profile,way,result,data)
     -- initial routability check, filters out buildings, boundaries, etc
   data.route = way:get_value_by_key("route")
@@ -317,7 +353,7 @@ function handle_bicycle_tags(profile,way,result,data)
 
   -- other tags
   data.junction = way:get_value_by_key("junction")
-  data.maxspeed = Measure.get_max_speed(way:get_value_by_key ("maxspeed")) or 0
+  data.maxspeed = parse_maxspeed(way)
   data.maxspeed_forward = Measure.get_max_speed(way:get_value_by_key("maxspeed:forward")) or 0
   data.maxspeed_backward = Measure.get_max_speed(way:get_value_by_key("maxspeed:backward")) or 0
   data.barrier = way:get_value_by_key("barrier")
@@ -333,6 +369,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.foot_forward = way:get_value_by_key("foot:forward")
   data.foot_backward = way:get_value_by_key("foot:backward")
   data.bicycle = way:get_value_by_key("bicycle")
+  data.lanes = way:get_value_by_key("lanes")
 
   speed_handler(profile,way,result,data)
 
@@ -343,7 +380,7 @@ function handle_bicycle_tags(profile,way,result,data)
 --   bike_push_handler(profile,way,result,data)
 
   -- width should be after bike_push
-  width_handler(profile,way,result,data)
+  --width_handler(profile,way,result,data)
 
   -- maxspeed
   limit( result, data.maxspeed, data.maxspeed_forward, data.maxspeed_backward )
@@ -369,9 +406,23 @@ function speed_handler(profile,way,result,data)
   -- speed
   local bridge_speed = profile.bridge_speeds[data.bridge]
   local tracktype = data.tracktype
-  if (data.highway == "track" or data.highway == "unclassified" or data.highway == "path") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
-    result.forward_speed = profile.default_speed
-    result.backward_speed = profile.default_speed
+  local lanes = data.lanes and tonumber(data.lanes) or 0
+
+  if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and (data.maxspeed > 80))) then
+    result.forward_speed = 1  -- Slower than default but not unusable
+    result.backward_speed = 1
+    result.forward_rate = 0.0001
+    result.backward_rate = 0.0001
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  elseif (data.highway == "track" or data.highway == "unclassified" or data.highway == "path" or data.bicycle == "yes" or data.bicycle == "designated") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
+    if (data.bicycle == "yes" or data.bicycle == "designated") then
+      result.forward_speed = profile.default_speed * 1.2
+      result.backward_speed = profile.default_speed * 1.2
+    else
+      result.forward_speed = profile.default_speed
+      result.backward_speed = profile.default_speed
+    end
   elseif (data.highway == "unclassified" and data.maxspeed >= 40 and data.maxspeed < 100) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
@@ -428,6 +479,15 @@ function speed_handler(profile,way,result,data)
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
     data.way_type_allows_pushing = true
+  end
+
+  -- Apply smoothness blocking - set speed to 0 for bad smoothness roads
+  if data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil then
+    local smoothness_speed = profile.smoothness_speeds[data.smoothness]
+    if smoothness_speed == 0 then
+      result.forward_speed = 0
+      result.backward_speed = 0
+    end
   end
 end
 
@@ -650,6 +710,7 @@ function process_way(profile, way, result)
     -- prefetch tags
     highway = way:get_value_by_key('highway'),
     surface = way:get_value_by_key('surface'),
+    smoothness = way:get_value_by_key('smoothness'),
 
     route = nil,
     man_made = nil,
@@ -695,11 +756,11 @@ function process_way(profile, way, result)
     -- toll=yes and oneway=reversible
     WayHandlers.blocked_ways,
 
-    -- our main handler
-    handle_bicycle_tags,
-
     -- compute speed taking into account way type, maxspeed tags, etc.
     WayHandlers.surface,
+
+    -- our main handler
+    handle_bicycle_tags,
 
     -- handle turn lanes and road classification, used for guidance
     WayHandlers.classification,
@@ -724,7 +785,6 @@ function process_way(profile, way, result)
 end
 
 function process_turn(profile, turn)
-  -- compute turn penalty as angle^2, with a left/right bias
   local normalized_angle = turn.angle / 90.0
   if normalized_angle >= 0.0 then
     turn.duration = normalized_angle * normalized_angle * profile.turn_penalty / profile.turn_bias
@@ -739,6 +799,15 @@ function process_turn(profile, turn)
   if turn.has_traffic_light then
      turn.duration = turn.duration + profile.properties.traffic_light_penalty
   end
+
+  local source_is_highway = (turn.source_mode == mode.highway_cycling)
+  local target_is_highway = (turn.target_mode == mode.highway_cycling)
+  if not source_is_highway and target_is_highway then
+    turn.duration = turn.duration + 600
+  elseif source_is_highway and not target_is_highway then
+    turn.duration = turn.duration + 600
+  end
+
   if profile.properties.weight_name == 'cyclability' then
     turn.weight = turn.duration
   end
