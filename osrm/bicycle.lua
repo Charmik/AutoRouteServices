@@ -5,10 +5,109 @@ api_version = 4
 Set = require('lib/set')
 Sequence = require('lib/sequence')
 Handlers = require("lib/way_handlers")
+Relations = require("lib/relations")
 TrafficSignal = require("lib/traffic_signal")
 find_access_tag = require("lib/access").find_access_tag
 limit = require("lib/maxspeed").limit
 Measure = require("lib/measure")
+
+function is_road_surface(surface)
+  if not surface then
+    return false
+  end
+  
+  local allowed_surfaces = {
+    "asphalt",
+    "paved", 
+    "concrete",
+    "concrete:plates",
+    "concrete:lanes",
+    "chipseal",
+    "tarmac",
+    "sealed",
+    "paving_stones",
+    "paving_stones:lanes",
+    "cobblestone:flattened",
+    "metal",
+    "wood"
+  }
+  
+  for _, allowed_surface in ipairs(allowed_surfaces) do
+    if surface == allowed_surface then
+      return true
+    end
+  end
+  
+  return false
+end
+
+function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
+  local allowed_bicycle_tags = {
+    "yes",
+    "designated",
+    "lane",
+    "track",
+    "shared_lane", 
+    "share_busway",
+    "shoulder",
+    "separate",
+    "opposite"
+  }
+  
+  local allowed_cycleway_tags = {
+    "lane",
+    "track",
+    "shared_lane",
+    "share_busway",
+    "shoulder",
+    "separate",
+    "opposite",
+    "opposite_lane",
+    "opposite_track"
+  }
+  
+  if bicycle_tag then
+    for _, tag in ipairs(allowed_bicycle_tags) do
+      if bicycle_tag == tag then
+        return true
+      end
+    end
+  end
+  
+  if bicycle_road_tag == "yes" then
+    return true
+  end
+  
+  if cyclestreet_tag == "yes" then
+    return true
+  end
+  
+  if cycleway_tag then
+    for _, tag in ipairs(allowed_cycleway_tags) do
+      if cycleway_tag == tag then
+        return true
+      end
+    end
+  end
+  
+  if cycleway_left_tag then
+    for _, tag in ipairs(allowed_cycleway_tags) do
+      if cycleway_left_tag == tag then
+        return true
+      end
+    end
+  end
+  
+  if cycleway_right_tag then
+    for _, tag in ipairs(allowed_cycleway_tags) do
+      if cycleway_right_tag == tag then
+        return true
+      end
+    end
+  end
+  
+  return false
+end
 
 function setup()
   local default_speed = 25
@@ -34,6 +133,7 @@ function setup()
       use_turn_restrictions         = false,
       continue_straight_at_waypoint = false,
       mode_change_penalty           = 30,
+      use_relations                 = true,
     },
 
     default_mode              = mode.cycling,
@@ -120,6 +220,29 @@ function setup()
       'opposite',
       'opposite_lane',
       'opposite_track',
+    },
+
+    cycleway_relation_types = Set {
+      'route',
+      'network'
+    },
+
+    cycleway_route_types = Set {
+      'bicycle',
+      'bike'
+    },
+
+    cycleway_network_types = Set {
+      'lcn',  -- local cycling network
+      'rcn',  -- regional cycling network  
+      'ncn',  -- national cycling network
+      'icn'   -- international cycling network
+    },
+
+    relation_types = Sequence {
+      "route",        -- Individual cycling routes
+      "route_master", -- Groups of related cycling routes
+      "network"       -- Bicycle networks
     },
 
     -- reduce the driving speed by 30% for unsafe roads
@@ -362,6 +485,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.cycleway = way:get_value_by_key("cycleway")
   data.cycleway_left = way:get_value_by_key("cycleway:left")
   data.cycleway_right = way:get_value_by_key("cycleway:right")
+  data.cycleway_surface = way:get_value_by_key("cycleway:surface")
   data.duration = way:get_value_by_key("duration")
   data.service = way:get_value_by_key("service")
   data.tracktype = way:get_value_by_key("tracktype")
@@ -369,6 +493,8 @@ function handle_bicycle_tags(profile,way,result,data)
   data.foot_forward = way:get_value_by_key("foot:forward")
   data.foot_backward = way:get_value_by_key("foot:backward")
   data.bicycle = way:get_value_by_key("bicycle")
+  data.bicycle_road = way:get_value_by_key("bicycle_road")
+  data.cyclestreet = way:get_value_by_key("cyclestreet")
   data.lanes = way:get_value_by_key("lanes")
 
   speed_handler(profile,way,result,data)
@@ -377,7 +503,7 @@ function handle_bicycle_tags(profile,way,result,data)
 
   cycleway_handler(profile,way,result,data)
 
---   bike_push_handler(profile,way,result,data)
+  bike_push_handler(profile,way,result,data)
 
   -- width should be after bike_push
   --width_handler(profile,way,result,data)
@@ -415,15 +541,19 @@ function speed_handler(profile,way,result,data)
     result.backward_rate = 0.0001
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (data.highway == "track" or data.highway == "unclassified" or data.highway == "path" or data.bicycle == "yes" or data.bicycle == "designated") and (data.surface == "asphalt" or data.surface == "paved" or data.surface == "asphalt" or data.surface == "concrete" or data.surface == "concrete:plates" or data.surface == "paving_stones" or data.surface == "paving_stones:lanes" or data.surface == "metal" or data.surface == "wood") then
-    if (data.bicycle == "yes" or data.bicycle == "designated") then
-      result.forward_speed = profile.default_speed * 1.2
-      result.backward_speed = profile.default_speed * 1.2
-    else
+  elseif isRoadBicycleAllowed(data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
+    local cycleWayMultiplicator = 2
+    if (data.highway == "cycleway") then --https://www.openstreetmap.org/way/1052708536
+      result.forward_speed = profile.default_speed * cycleWayMultiplicator
+      result.backward_speed = profile.default_speed * cycleWayMultiplicator
+    elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
+      result.forward_speed = profile.default_speed * cycleWayMultiplicator
+      result.backward_speed = profile.default_speed * cycleWayMultiplicator
+    else --https://www.openstreetmap.org/way/970634864
       result.forward_speed = profile.default_speed
       result.backward_speed = profile.default_speed
     end
-  elseif (data.highway == "unclassified" and data.maxspeed >= 40 and data.maxspeed < 100) then
+  elseif (data.highway == "unclassified" and ((data.maxspeed >= 40 and data.maxspeed < 100) or is_road_surface(data.surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
   elseif (bridge_speed and bridge_speed > 0) then
@@ -468,6 +598,10 @@ function speed_handler(profile,way,result,data)
     -- parking areas
     result.forward_speed = profile.amenity_speeds[data.amenity]
     result.backward_speed = profile.amenity_speeds[data.amenity]
+    data.way_type_allows_pushing = true
+  elseif data.highway == "footway" and data.bicycle == "permissive" then --https://www.openstreetmap.org/way/249681202
+    result.forward_speed = 5
+    result.backward_speed = 5
     data.way_type_allows_pushing = true
   elseif profile.bicycle_speeds[data.highway] then
     -- regular ways
@@ -690,9 +824,62 @@ function safety_handler(profile,way,result,data)
   end
 end
 
+function get_cycle_network_speed_boost(way, relations, profile)
+  local boost = 1.0
+
+  if not relations then
+    return boost
+  end
+  
+
+  local rel_id_list = relations:get_relations(way)
+
+  for i, rel_id in ipairs(rel_id_list) do
+    local rel = relations:relation(rel_id)
+    local rel_id_num = rel:id()
+    
+    local rel_type = rel:get_value_by_key('type')
+    local route_type = rel:get_value_by_key('route')
+    local network = rel:get_value_by_key('network')
+    
+    local is_cycling_relation = false
+
+    if rel_type == 'route' and profile.cycleway_route_types[route_type] then
+      is_cycling_relation = true
+    elseif rel_type == 'route_master' and profile.cycleway_route_types[route_type] then
+      is_cycling_relation = true
+    elseif rel_type == 'network' then
+      local network_type = rel:get_value_by_key('network')
+      if network_type and profile.cycleway_network_types[network_type] then
+        is_cycling_relation = true
+        network = network_type  -- Use network type for boost calculation
+      end
+    end
+    
+    if is_cycling_relation then
+      if network and profile.cycleway_network_types[network] then
+        -- Apply speed boost based on network hierarchy
+        if network == 'lcn' then        -- Local cycling network
+          boost = 3.1
+        elseif network == 'rcn' then    -- Regional cycling network
+          boost = 3.2
+        elseif network == 'ncn' then    -- National cycling network
+          boost = 3.3
+        elseif network == 'icn' then    -- International cycling network
+          boost = 3.4
+        end
+      else
+        boost = 3
+      end
+      boost = 10
+    end
+  end
+  return boost
+end
 
 
-function process_way(profile, way, result)
+
+function process_way(profile, way, result, relations)
   -- the initial filtering of ways based on presence of tags
   -- affects processing times significantly, because all ways
   -- have to be checked.
@@ -778,11 +965,31 @@ function process_way(profile, way, result)
     WayHandlers.classes,
 
     -- set weight properties of the way
-    WayHandlers.weights
+    WayHandlers.weights,
+
+    --Relations.process_way_refs(way, relations, result)
   }
 
   WayHandlers.run(profile, way, result, data, handlers)
+  
+  if relations then
+    local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
+    if speed_boost > 1.0 then
+      -- If we have cycle network relations, boost the speed
+      if result.forward_speed > 0 then
+        result.forward_speed = result.forward_speed * speed_boost
+        result.backward_speed = result.backward_speed * speed_boost
+      else
+        -- For ways with 0 speed but part of cycle network, give them basic speed
+        result.forward_speed = 5
+        result.backward_speed = 5
+        result.forward_mode = mode.cycling
+        result.backward_mode = mode.cycling
+      end
+    end
+  end
 end
+
 
 function process_turn(profile, turn)
   local normalized_angle = turn.angle / 90.0
