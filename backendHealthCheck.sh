@@ -2,9 +2,40 @@
 
 # Log file setup
 #LOG_DIR="/home/charm/data/backed_health_logs"
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 [test|prod]"
+    exit 1
+fi
+
+ENV=$1
+
+case $ENV in
+    "test")
+        SERVER_IP="88.99.161.250"
+        TELEGRAM_CONFIG="group_test.conf"
+        WAIT_TIME=60
+        SLEEP_BETWEEN_TIME=30
+        ;;
+    "prod")
+        SERVER_IP="65.21.136.166"
+        TELEGRAM_CONFIG="group_prod.conf"
+        WAIT_TIME=30
+        SLEEP_BETWEEN_TIME=120
+        ;;
+    *)
+        echo "Error: Environment must be 'test' or 'prod'"
+        exit 1
+        ;;
+esac
+
 LOG_DIR="."
 LOG_FILE="$LOG_DIR/route-check-$(date +%Y%m%d).log"
-STATE_FILE="$LOG_DIR/route-check-state.txt"
+STATE_FILE="$LOG_DIR/route-check-state-$ENV.txt"
+
+echo "Setting up $ENV environment..."
+echo "IP: $SERVER_IP"
+echo "TELEGRAM_CONFIG: $TELEGRAM_CONFIG"
+echo "STATE_FILE: $STATE_FILE"
 
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
@@ -36,6 +67,18 @@ generate_random_offset() {
   local RANDOM_NUM=$((RANDOM % 1000 + 1))
   # Convert to an offset between 0.000001 and 0.001
   echo "scale=9; $RANDOM_NUM / 1000000" | bc
+}
+
+# Function to generate random coordinates within valid ranges
+generate_random_coordinates() {
+  # Generate random latitude between -90 and 90
+  local LAT=$(echo "scale=9; (($RANDOM * 180) / 32767) - 90" | bc)
+
+  # Generate random longitude between -180 and 180
+  local LON=$(echo "scale=9; (($RANDOM * 360) / 32767) - 180" | bc)
+
+  # Return the coordinates
+  echo "$LAT $LON"
 }
 
 # Function to check a location
@@ -80,15 +123,20 @@ checkLocation() {
     JSON_LON=$(echo $JSON_LON | sed 's/-\./-0\./g')
   fi
 
-  RESPONSE=$(curl -s -X POST "http://65.21.97.107:7070/api/v1/generateRoutes" \
+  RESPONSE=$(curl -s -X POST "http://$SERVER_IP:7070/api/v1/generateRoutes" \
        -H "Content-Type: application/json" \
        -d "{
-         \"lat\": $ACTUAL_LAT,
-         \"lon\": $JSON_LON,
+           \"start\": {
+           \"lat\": $ACTUAL_LAT,
+           \"lon\": $JSON_LON
+         },
          \"min_distance\": $MIN_DISTANCE,
          \"max_distance\": $MAX_DISTANCE,
          \"generation_mode\": \"sights\",
-         \"generation_params\": {}
+         \"generation_params\": {
+          \"city_type\": \"outside\",
+          \"sights\": \"all\"
+        }
        }")
 
   log "Response: $RESPONSE"
@@ -98,22 +146,18 @@ checkLocation() {
 
   if [ -z "$UUID" ]; then
     log "Failed to get UUID from response"
-    /home/charm/.local/bin/telegram-send "BACKEND FAILED: Could not obtain UUID from route generation request for $LOCATION_NAME"
+    /home/charm/.local/bin/telegram-send --config $TELEGRAM_CONFIG "BACKEND FAILED: Could not obtain UUID from route generation request for $LOCATION_NAME"
     update_state "FAIL"
     return 1
   fi
 
   log "Got UUID: $UUID"
-  local WAIT_TIME=15
-  if [ $MIN_DISTANCE -gt 200 ]; then
-    WAIT_TIME=20
-  fi
   log "Waiting $WAIT_TIME seconds before requesting routes..."
   sleep $WAIT_TIME
 
   # Send second request to get the routes
   log "Requesting routes with UUID: $UUID"
-  ROUTES_RESPONSE=$(curl -s -X GET "http://65.21.97.107:7070/api/v1/generateRoutes?uuid=$UUID&start_index=0")
+  ROUTES_RESPONSE=$(curl -s -X GET "http://$SERVER_IP:7070/api/v1/generateRoutes?uuid=$UUID&start_index=0")
 
   log "Routes response received"
 
@@ -140,7 +184,7 @@ checkLocation() {
     # Check if previous state was FAIL, then send recovery notification
     if [ "$PREVIOUS_STATE" = "FAIL" ]; then
       log "✅ System recovered after previous failure"
-      /home/charm/.local/bin/telegram-send "✅✅✅ Now it's good. Backend recovered and is generating routes properly for $LOCATION_NAME"
+      /home/charm/.local/bin/telegram-send --config $TELEGRAM_CONFIG "✅✅✅ Now it's good. Backend recovered and is generating routes properly for $LOCATION_NAME"
     fi
 
     update_state "OK"
@@ -149,16 +193,30 @@ checkLocation() {
     # No routes and not in a processing state - this indicates a failure
     ERROR_MSG="❌❌❌ BACKEND FAILED: No routes generated for $LOCATION_NAME coordinates $ACTUAL_LAT, $ACTUAL_LON. Status: $STATUS"
     log "$ERROR_MSG"
-    /home/charm/.local/bin/telegram-send "$ERROR_MSG"
+    /home/charm/.local/bin/telegram-send --config $TELEGRAM_CONFIG "$TELEGRAM_CONFIG $ERROR_MSG"
     update_state "FAIL"
     return 1
   fi
 }
 
 checkLocation 34.686971 33.036906 29 59 "Limassol"
-sleep 120
+sleep $SLEEP_BETWEEN_TIME
 checkLocation 51.50744559999998 -0.1277653 28 59 "London"
-sleep 120
+sleep $SLEEP_BETWEEN_TIME
 checkLocation 59.89686549999996 29.0765628 27 59 "Sbor"
-sleep 120
-checkLocation 19.4326296 -99.13317850000001 201 300 "Mexico-City"
+sleep $SLEEP_BETWEEN_TIME
+#checkLocation 19.4326296 -99.13317850000001 201 300 "Mexico-City"
+#sleep 120
+
+# Generate random coordinates and check a random location
+#RANDOM_COORDS=$(generate_random_coordinates)
+#RANDOM_LAT=$(echo $RANDOM_COORDS | cut -d' ' -f1)
+#RANDOM_LON=$(echo $RANDOM_COORDS | cut -d' ' -f2)
+## Random distance range between 30-100km
+#MIN_DISTANCE=$((RANDOM % 71 + 30))
+#MAX_DISTANCE=$((MIN_DISTANCE + 30))
+#checkLocation $RANDOM_LAT $RANDOM_LON $MIN_DISTANCE $MAX_DISTANCE "Random-Location"
+
+
+#charm@Ubuntu-2404-noble-amd64-base:~/data/AutoRoute/logs$ telegram-send --config group_test.conf "SSSS"
+#charm@Ubuntu-2404-noble-amd64-base:~/data/AutoRoute/logs$ telegram-send --config group_prod.conf "SSSS"
