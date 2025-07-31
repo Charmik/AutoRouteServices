@@ -41,19 +41,19 @@ function is_road_surface(surface)
   return false
 end
 
-function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
+function isRoadBicycleAllowed(highway_tag, bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
   local allowed_bicycle_tags = {
     "yes",
     "designated",
     "lane",
     "track",
-    "shared_lane", 
+    "shared_lane",
     "share_busway",
     "shoulder",
     "separate",
     "opposite"
   }
-  
+
   local allowed_cycleway_tags = {
     "lane",
     "track",
@@ -65,7 +65,11 @@ function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cy
     "opposite_lane",
     "opposite_track"
   }
-  
+
+  if ("cycleway" == highway_tag) then
+    return true
+  end
+
   if bicycle_tag then
     for _, tag in ipairs(allowed_bicycle_tags) do
       if bicycle_tag == tag then
@@ -73,15 +77,15 @@ function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cy
       end
     end
   end
-  
+
   if bicycle_road_tag == "yes" then
     return true
   end
-  
+
   if cyclestreet_tag == "yes" then
     return true
   end
-  
+
   if cycleway_tag then
     for _, tag in ipairs(allowed_cycleway_tags) do
       if cycleway_tag == tag then
@@ -89,7 +93,7 @@ function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cy
       end
     end
   end
-  
+
   if cycleway_left_tag then
     for _, tag in ipairs(allowed_cycleway_tags) do
       if cycleway_left_tag == tag then
@@ -97,7 +101,7 @@ function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cy
       end
     end
   end
-  
+
   if cycleway_right_tag then
     for _, tag in ipairs(allowed_cycleway_tags) do
       if cycleway_right_tag == tag then
@@ -105,7 +109,7 @@ function isRoadBicycleAllowed(bicycle_tag, bicycle_road_tag, cyclestreet_tag, cy
       end
     end
   end
-  
+
   return false
 end
 
@@ -234,7 +238,7 @@ function setup()
 
     cycleway_network_types = Set {
       'lcn',  -- local cycling network
-      'rcn',  -- regional cycling network  
+      'rcn',  -- regional cycling network
       'ncn',  -- national cycling network
       'icn'   -- international cycling network
     },
@@ -497,11 +501,10 @@ function handle_bicycle_tags(profile,way,result,data)
   data.cyclestreet = way:get_value_by_key("cyclestreet")
   data.lanes = way:get_value_by_key("lanes")
 
+  --cycleway_handler(profile,way,result,data)
   speed_handler(profile,way,result,data)
 
   oneway_handler(profile,way,result,data)
-
-  cycleway_handler(profile,way,result,data)
 
   bike_push_handler(profile,way,result,data)
 
@@ -541,9 +544,9 @@ function speed_handler(profile,way,result,data)
     result.backward_rate = 0.0001
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif isRoadBicycleAllowed(data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
+  elseif isRoadBicycleAllowed(data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
-    if (data.highway == "cycleway") then --https://www.openstreetmap.org/way/1052708536
+    if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
       result.forward_speed = profile.default_speed * cycleWayMultiplicator
       result.backward_speed = profile.default_speed * cycleWayMultiplicator
     elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
@@ -556,6 +559,12 @@ function speed_handler(profile,way,result,data)
   elseif (data.highway == "unclassified" and ((data.maxspeed >= 40 and data.maxspeed < 100) or is_road_surface(data.surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
+  elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(data.surface))) then
+    result.forward_speed = profile.default_speed
+    result.backward_speed = profile.default_speed
+  elseif ((data.highway == "footway") and (is_road_surface(data.surface))) then
+    result.forward_speed = 5
+    result.backward_speed = 5
   elseif (bridge_speed and bridge_speed > 0) then
     data.highway = data.bridge
     if data.duration and durationIsValid(data.duration) then
@@ -604,14 +613,21 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = 5
     data.way_type_allows_pushing = true
   elseif profile.bicycle_speeds[data.highway] then
-    -- regular ways
-    result.forward_speed = profile.bicycle_speeds[data.highway]
-    result.backward_speed = profile.bicycle_speeds[data.highway]
+    local speed = profile.bicycle_speeds[data.highway]
+    if speed == profile.default_speed and not data.surface then
+      speed = speed / 3
+    end
+    result.forward_speed = speed
+    result.backward_speed = speed
     data.way_type_allows_pushing = true
   elseif data.access and profile.access_tag_whitelist[data.access]  then
     -- unknown way, but valid access tag
-    result.forward_speed = profile.default_speed
-    result.backward_speed = profile.default_speed
+    local speed = profile.default_speed
+    if not data.surface then
+      speed = speed / 3
+    end
+    result.forward_speed = speed
+    result.backward_speed = speed
     data.way_type_allows_pushing = true
   end
 
@@ -830,18 +846,18 @@ function get_cycle_network_speed_boost(way, relations, profile)
   if not relations then
     return boost
   end
-  
+
 
   local rel_id_list = relations:get_relations(way)
 
   for i, rel_id in ipairs(rel_id_list) do
     local rel = relations:relation(rel_id)
     local rel_id_num = rel:id()
-    
+
     local rel_type = rel:get_value_by_key('type')
     local route_type = rel:get_value_by_key('route')
     local network = rel:get_value_by_key('network')
-    
+
     local is_cycling_relation = false
 
     if rel_type == 'route' and profile.cycleway_route_types[route_type] then
@@ -855,23 +871,22 @@ function get_cycle_network_speed_boost(way, relations, profile)
         network = network_type  -- Use network type for boost calculation
       end
     end
-    
+
     if is_cycling_relation then
       if network and profile.cycleway_network_types[network] then
         -- Apply speed boost based on network hierarchy
         if network == 'lcn' then        -- Local cycling network
-          boost = 3.1
+          boost = 2.1
         elseif network == 'rcn' then    -- Regional cycling network
-          boost = 3.2
+          boost = 2.2
         elseif network == 'ncn' then    -- National cycling network
-          boost = 3.3
+          boost = 2.3
         elseif network == 'icn' then    -- International cycling network
-          boost = 3.4
+          boost = 2.4
         end
       else
         boost = 3
       end
-      boost = 10
     end
   end
   return boost
@@ -971,14 +986,22 @@ function process_way(profile, way, result, relations)
   }
 
   WayHandlers.run(profile, way, result, data, handlers)
-  
-  if relations then
+
+  if relations and data.highway == "cycleway" then
     local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
     if speed_boost > 1.0 then
-      -- If we have cycle network relations, boost the speed
-      if result.forward_speed > 0 then
-        result.forward_speed = result.forward_speed * speed_boost
-        result.backward_speed = result.backward_speed * speed_boost
+      local forward_speed = profile.default_speed
+      local backward_speed = profile.default_speed
+
+      if (result.forward_speed < forward_speed) then
+        forward_speed = result.forward_speed
+      end
+      if (result.backward_speed < backward_speed) then
+        backward_speed = result.backward_speed
+      end
+      if forward_speed > 0 then
+        result.forward_speed = forward_speed * speed_boost
+        result.backward_speed = backward_speed * speed_boost
       else
         -- For ways with 0 speed but part of cycle network, give them basic speed
         result.forward_speed = 5
