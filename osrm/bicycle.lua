@@ -617,6 +617,9 @@ function speed_handler(profile,way,result,data)
     if speed == profile.default_speed and not data.surface then
       speed = speed / 3
     end
+    if (data.surface and profile.surface_speeds[data.surface] and profile.surface_speeds[data.surface] < speed) then
+      speed = profile.surface_speeds[data.surface]
+    end
     result.forward_speed = speed
     result.backward_speed = speed
     data.way_type_allows_pushing = true
