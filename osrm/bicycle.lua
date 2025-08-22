@@ -556,7 +556,7 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = profile.default_speed
       result.backward_speed = profile.default_speed
     end
-  elseif (data.highway == "unclassified" and ((data.maxspeed >= 40 and data.maxspeed < 100) or is_road_surface(data.surface))) then
+  elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not data.surface) or is_road_surface(data.surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
   elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(data.surface))) then
