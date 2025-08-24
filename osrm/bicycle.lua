@@ -612,7 +612,7 @@ function speed_handler(profile,way,result,data)
   elseif profile.bicycle_speeds[data.highway] then
     local speed = profile.bicycle_speeds[data.highway]
     if speed == profile.default_speed and not data.surface then
-      speed = 0
+      speed = speed / 20
     end
     if (data.surface and profile.surface_speeds[data.surface] and profile.surface_speeds[data.surface] < speed) then
       speed = profile.surface_speeds[data.surface]
