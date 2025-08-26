@@ -7,7 +7,7 @@ Requires=docker.service
 User=charm
 Group=charm
 
-ExecStart=/usr/bin/docker run --rm --network=host -v /home/charm/data/osrm:/data --name osrm-backend ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm ch --mmap on --verbosity WARNING /data/planet-latest.osrm -p 8003
+ExecStart=/usr/bin/docker run --rm --network=host --platform linux/amd64 -v /home/charm/data/osrm:/data --name osrm-backend ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld --mmap on /data/planet-latest.osrm -p 8003
 ExecStop=/usr/bin/docker stop osrm-backend
 WorkingDirectory=/home/charm/data/osrm
 
