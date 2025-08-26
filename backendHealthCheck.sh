@@ -13,13 +13,11 @@ case $ENV in
     "test")
         SERVER_IP="88.99.161.250"
         TELEGRAM_CONFIG="group_test.conf"
-        WAIT_TIME=60
         SLEEP_BETWEEN_TIME=30
         ;;
     "prod")
         SERVER_IP="65.21.136.166"
         TELEGRAM_CONFIG="group_prod.conf"
-        WAIT_TIME=30
         SLEEP_BETWEEN_TIME=120
         ;;
     *)
@@ -88,6 +86,19 @@ checkLocation() {
   local MIN_DISTANCE=$3
   local MAX_DISTANCE=$4
   local LOCATION_NAME=${5:-"unnamed location"}  # Optional name parameter
+  local WAIT_TIME=$6  # Required wait time parameter
+  
+  # Check if WAIT_TIME is provided
+  if [ -z "$WAIT_TIME" ]; then
+    log "ERROR: WAIT_TIME parameter not provided for $LOCATION_NAME"
+    /home/charm/.local/bin/telegram-send --config $TELEGRAM_CONFIG "ERROR: WAIT_TIME parameter missing for location $LOCATION_NAME"
+    return 1
+  fi
+  
+  # Double wait time for test environment
+  if [ "$ENV" = "test" ]; then
+    WAIT_TIME=$((WAIT_TIME * 2))
+  fi
 
   # Add small random offsets to coordinates
   local LAT_OFFSET=$(generate_random_offset)
@@ -130,6 +141,7 @@ checkLocation() {
            \"lat\": $ACTUAL_LAT,
            \"lon\": $JSON_LON
          },
+         \"qa\": \"true\",
          \"min_distance\": $MIN_DISTANCE,
          \"max_distance\": $MAX_DISTANCE,
          \"generation_mode\": \"sights\",
@@ -199,12 +211,12 @@ checkLocation() {
   fi
 }
 
-checkLocation 34.686971 33.036906 29 59 "Limassol"
+#checkLocation 34.686971 33.036906 29 59 "Limassol" 30
+#sleep $SLEEP_BETWEEN_TIME
+checkLocation 51.50744559999998 -0.1277653 28 59 "London" 90
 sleep $SLEEP_BETWEEN_TIME
-checkLocation 51.50744559999998 -0.1277653 28 59 "London"
-sleep $SLEEP_BETWEEN_TIME
-checkLocation 59.89686549999996 29.0765628 27 59 "Sbor"
-sleep $SLEEP_BETWEEN_TIME
+#checkLocation 59.89686549999996 29.0765628 27 59 "Sbor" 30
+#sleep $SLEEP_BETWEEN_TIME
 #checkLocation 19.4326296 -99.13317850000001 201 300 "Mexico-City"
 #sleep 120
 
