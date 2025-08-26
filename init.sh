@@ -1,5 +1,9 @@
 #!/bin/bash
 
+#useradd -m -s /bin/bash charm
+#usermod -aG sudo charm
+#
+
 # Enable error handling and command trace
 set -ex
 
@@ -15,6 +19,10 @@ CREATE DATABASE charmdb;
 CREATE ROLE charm WITH LOGIN SUPERUSER PASSWORD 'qwe';
 GRANT ALL PRIVILEGES ON DATABASE charmdb TO charm;
 EOF
+
+mkdir ~/data/fast_postgres
+sudo chown -R postgres:postgres ~/data/fast_postgres/
+sudo chmod 700 ~/data/fast_postgres/
 
 # docker
 sudo apt-get -y install ca-certificates curl
