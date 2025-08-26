@@ -19,7 +19,7 @@ date
 telegram-send "Extract finished $(hostname)"
 
 #docker run --rm -t --platform linux/amd64 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-partition --max-cell-sizes=1024,16384,262144,4194304 /data/planet-latest.osrm || echo "osrm-partition failed"
-~/disk/osrm-backend/build/osrm-partition -max-cell-sizes=1024,16384,262144,4194304 planet-latest.osrm || echo "osrm-partition failed"
+~/disk/osrm-backend/build/osrm-partition --max-cell-sizes=1024,16384,262144,4194304 planet-latest.osrm || echo "osrm-partition failed"
 telegram-send "Partition finished $(hostname)"
 
 #docker run --rm -t --platform linux/amd64 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-customize /data/planet-latest.osrm || echo "osrm-customize failed"

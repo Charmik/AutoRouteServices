@@ -2,7 +2,7 @@
 set -ex
 
 
-services=("autoroute.service" "osrm.service" "photon.service")
+services=("autoroute.service" "photon.service")
 
 #copy opentopodata project & aster30m
 #cd /home/charm/disk
@@ -35,6 +35,8 @@ fi
 
 cd /home/charm/data
 mkdir -p AutoRoute
+cd AutoRoute
+mkdir -p config
 
 cd /home/charm/data/AutoRouteServices
 

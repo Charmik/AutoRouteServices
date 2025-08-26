@@ -11,13 +11,20 @@ curl -OL https://download.geofabrik.de/europe/germany-latest.osm.pbf
 curl -OL https://download.geofabrik.de/europe/austria-latest.osm.pbf
 curl -OL https://download.geofabrik.de/europe/switzerland-latest.osm.pbf
 curl -OL https://download.geofabrik.de/europe/denmark-latest.osm.pbf
+curl -OL https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf
+curl -OL https://download.geofabrik.de/asia/japan/kanto-latest.osm.pbf
+curl -OL https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf
 
 ls -lh *.osm.pbf
 rm merged.osm.pbf; osmium merge *pbf -o merged.osm.pbf
 
-docker run --rm -t --platform linux/amd64 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-extract -p /data/bicycle.lua /data/merged.osm.pbf || echo "osrm-extract failed"
-docker run --rm -t --platform linux/amd64 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-partition /data/merged.osrm || echo "osrm-partition failed"
-docker run --rm -t --platform linux/amd64 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-customize /data/merged.osrm || echo "osrm-customize failed"
+cp ~/disk/traffic_dumps/traffic_final.csv .
+
+cp -r ~/disk/osrm-backend/profiles/lib/ .
+
+~/disk/osrm-backend/build/osrm-extract -p bicycle.lua merged.osm.pbf || echo "osrm-extract failed"
+~/disk/osrm-backend/build/osrm-partition merged.osrm || echo "osrm-partition failed"
+~/disk/osrm-backend/build/osrm-customize merged.osrm --segment-speed-file traffic_final.csv || echo "osrm-customize failed"
 
 sudo chmod 644 merged.osrm.fileIndex
 rm *.pbf
