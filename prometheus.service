@@ -1,0 +1,24 @@
+[Unit]
+Description=Prometheus Server
+Documentation=https://prometheus.io/docs/introduction/overview/
+After=network-online.target
+
+[Service]
+Type=simple
+User=charm
+Group=charm
+ExecStart=/home/charm/disk/prometheus-3.5.0.linux-amd64/prometheus --config.file=/home/charm/disk/prometheus-3.5.0.linux-amd64/prometheus.yml --web.enable-admin-api
+WorkingDirectory=/home/charm/disk/prometheus-3.5.0.linux-amd64
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=prometheus
+
+[Install]
+WantedBy=multi-user.target
+
+#sudo cp prometheus.service /etc/systemd/system/
+#sudo systemctl daemon-reload
+#sudo systemctl start prometheus
+#sudo systemctl status prometheus
