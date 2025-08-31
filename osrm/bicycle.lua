@@ -267,8 +267,8 @@ function setup()
 
     bicycle_speeds = {
       cycleway = default_speed * 1.2, --2mil
-      primary = default_speed, --3.8mil
-      trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
+      primary = default_speed / 2, --3.8mil
+      trunk = default_speed / 2, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
       trunk_link = default_speed,
       primary_link = 1, --469k
       secondary = default_speed, --5.4mil
@@ -325,11 +325,17 @@ function setup()
       asphalt = default_speed,
       chipseal = default_speed,
       concrete = default_speed,
-      concrete_lanes = default_speed,
+      paved = default_speed,
+      concrete = default_speed,
+      ["concrete:plates"] = default_speed,
+      ["concrete:lanes"] = default_speed,
+      tarmac = default_speed,
+      sealed = default_speed,
       wood = 10,
       metal = 10,
       ["cobblestone:flattened"] = 10,
       paving_stones = 10,
+      ["paving_stones:lanes"] = 10,
       compacted = 0,
       cobblestone = 6,
       unpaved = 0,
@@ -358,8 +364,7 @@ function setup()
     },
 
     tracktype_speeds = {
---       grade1 = default_speed,  -- Default speed for grade1
-      grade1 = 0.01,
+      grade1 = 0,   -- Default speed for grade1
       grade2 = 0,   -- Speed 0 for grade2 (avoid)
       grade3 = 0,   -- Speed 0 for grade3 (avoid)
       grade4 = 0,   -- Speed 0 for grade4 (avoid)
@@ -499,6 +504,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.bicycle = way:get_value_by_key("bicycle")
   data.bicycle_road = way:get_value_by_key("bicycle_road")
   data.cyclestreet = way:get_value_by_key("cyclestreet")
+  data.footway = way:get_value_by_key("footway")
   data.lanes = way:get_value_by_key("lanes")
 
   --cycleway_handler(profile,way,result,data)
@@ -537,14 +543,57 @@ function speed_handler(profile,way,result,data)
   local tracktype = data.tracktype
   local lanes = data.lanes and tonumber(data.lanes) or 0
 
+  -- Check for NHS (major highways), HGV (truck traffic), and expressway tags
+  local nhs = way:get_value_by_key("NHS")
+  local hgv = way:get_value_by_key("hgv")
+  local expressway = way:get_value_by_key("expressway")
+
+  local speed = profile.bicycle_speeds[data.highway] or 0
+  if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
+      if data.surface and is_road_surface(data.surface) then
+        speed = profile.surface_speeds[data.surface]
+      elseif data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil and profile.smoothness_speeds[data.smoothness] > 0 then
+        speed = profile.default_speed
+      else
+        speed = profile.tracktype_speeds[tracktype]
+      end
+  end
+  if (data.highway == "path" and is_road_surface(data.surface)) then -- https://www.openstreetmap.org/way/1163443297
+    speed = profile.default_speed
+  end
+
   if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and (data.maxspeed > 80))) then
-    result.forward_speed = 1  -- Slower than default but not unusable
+    result.forward_speed = 1
     result.backward_speed = 1
     result.forward_rate = 0.0001
     result.backward_rate = 0.0001
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif isRoadBicycleAllowed(data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
+  elseif expressway == "yes" then
+    -- Avoid expressways (high-speed roads similar to highways)
+    result.forward_speed = 0.01  -- Practically avoid
+    result.backward_speed = 0.01
+    result.forward_rate = 0.0001
+    result.backward_rate = 0.0001
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  elseif nhs and (nhs == "yes" or nhs == "Interstate" or nhs == "STRAHNET") then
+    -- Avoid NHS highways (major national highways with heavy traffic)
+    result.forward_speed = 0.01  -- Practically avoid
+    result.backward_speed = 0.01
+    result.forward_rate = 0.0001
+    result.backward_rate = 0.0001
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  elseif hgv == "designated" then
+    -- Heavily penalize designated truck routes
+    result.forward_speed = 1
+    result.backward_speed = 1
+    result.forward_rate = 0.001
+    result.backward_rate = 0.001
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  elseif (speed > 15) and isRoadBicycleAllowed(data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
     if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
       result.forward_speed = profile.default_speed * cycleWayMultiplicator
@@ -562,9 +611,9 @@ function speed_handler(profile,way,result,data)
   elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(data.surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
-  elseif ((data.highway == "footway") and (is_road_surface(data.surface))) then
-    result.forward_speed = 5
-    result.backward_speed = 5
+  elseif ((data.highway == "footway" or data.footway == "sidewalk") and (is_road_surface(data.surface))) then -- https://www.openstreetmap.org/way/664723821
+    result.forward_speed = 0.01
+    result.backward_speed = 0.01
   elseif (bridge_speed and bridge_speed > 0) then
     data.highway = data.bridge
     if data.duration and durationIsValid(data.duration) then
@@ -574,8 +623,8 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = bridge_speed
     data.way_type_allows_pushing = true
   elseif tracktype and profile.tracktype_speeds[tracktype] then
-    result.forward_speed = profile.tracktype_speeds[tracktype]
-    result.backward_speed = profile.tracktype_speeds[tracktype]
+    result.forward_speed = speed
+    result.backward_speed = speed
     data.way_type_allows_pushing = true
   elseif profile.route_speeds[data.route] then
     -- ferries (doesn't cover routes tagged using relations)
@@ -610,9 +659,12 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = 5
     data.way_type_allows_pushing = true
   elseif profile.bicycle_speeds[data.highway] then
-    local speed = profile.bicycle_speeds[data.highway]
-    if speed == profile.default_speed and not data.surface then
-      speed = speed / 20
+    if speed >= profile.default_speed and not data.surface then
+      if (data.highway == "cycleway" or data.bicycle == "designated") then
+        speed = speed / 10
+      else
+        speed = speed / 20
+      end
     end
     if (data.surface and profile.surface_speeds[data.surface] and profile.surface_speeds[data.surface] < speed) then
       speed = profile.surface_speeds[data.surface]
@@ -638,6 +690,12 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = 0
       result.backward_speed = 0
     end
+  end
+
+  -- Boost roads that explicitly prohibit trucks (likely quieter for cycling)
+  if hgv == "no" and result.forward_speed > 0 then
+    result.forward_speed = result.forward_speed * 1.2
+    result.backward_speed = result.backward_speed * 1.2
   end
 end
 
