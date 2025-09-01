@@ -38,6 +38,8 @@ rsync -r --progress ~/disk/osrm_full_$DATE charm@88.99.161.250:/home/charm/disk/
 rsync -r --progress ~/disk/osrm_full_$DATE charm@65.21.136.166:/home/charm/disk/
 telegram-send "Finished rsync osrm to testing/prod"
 
+~/disk/osrm-backend/build/osrm-routed --algorithm mld --mmap on planet-latest.osrm -p 8003
+
 #CH
 #docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-contract /data/planet-latest.osrm || echo "osrm-contract failed"
 
