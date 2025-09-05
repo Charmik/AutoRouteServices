@@ -552,8 +552,6 @@ function speed_handler(profile,way,result,data)
   if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
       if data.surface and is_road_surface(data.surface) then
         speed = profile.surface_speeds[data.surface]
-      elseif data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil and profile.smoothness_speeds[data.smoothness] > 0 then
-        speed = profile.default_speed
       else
         speed = profile.tracktype_speeds[tracktype]
       end
@@ -683,12 +681,16 @@ function speed_handler(profile,way,result,data)
     data.way_type_allows_pushing = true
   end
 
-  -- Apply smoothness blocking - set speed to 0 for bad smoothness roads
   if data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil then
     local smoothness_speed = profile.smoothness_speeds[data.smoothness]
     if smoothness_speed == 0 then
-      result.forward_speed = 0
-      result.backward_speed = 0
+      if is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/938099187 https://www.openstreetmap.org/way/454657895
+        result.forward_speed = 0.1
+        result.backward_speed = 0.1
+      else
+        result.forward_speed = 0
+        result.backward_speed = 0
+      end
     end
   end
 
@@ -934,13 +936,13 @@ function get_cycle_network_speed_boost(way, relations, profile)
       if network and profile.cycleway_network_types[network] then
         -- Apply speed boost based on network hierarchy
         if network == 'lcn' then        -- Local cycling network
-          boost = 2.1
+          boost = 2.5
         elseif network == 'rcn' then    -- Regional cycling network
-          boost = 2.2
+          boost = 2.6
         elseif network == 'ncn' then    -- National cycling network
-          boost = 2.3
+          boost = 2.7
         elseif network == 'icn' then    -- International cycling network
-          boost = 2.4
+          boost = 2.8
         end
       else
         boost = 3
@@ -1045,27 +1047,36 @@ function process_way(profile, way, result, relations)
 
   WayHandlers.run(profile, way, result, data, handlers)
 
-  if relations and data.highway == "cycleway" then
-    local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
-    if speed_boost > 1.0 then
-      local forward_speed = profile.default_speed
-      local backward_speed = profile.default_speed
+  if relations then
+    local is_good_cycling_infrastructure = false
+    
+    if data.highway == "cycleway" then
+      is_good_cycling_infrastructure = true
+    elseif (data.highway == "track" or data.highway == "residential") and data.surface and is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/340134972 https://www.openstreetmap.org/way/100520383
+      is_good_cycling_infrastructure = true
+    end
+    
+    if is_good_cycling_infrastructure then
+      local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
+      if speed_boost > 1.0 then
+        local forward_speed = profile.default_speed
+        local backward_speed = profile.default_speed
 
-      if (result.forward_speed < forward_speed) then
-        forward_speed = result.forward_speed
-      end
-      if (result.backward_speed < backward_speed) then
-        backward_speed = result.backward_speed
-      end
-      if forward_speed > 0 then
-        result.forward_speed = forward_speed * speed_boost
-        result.backward_speed = backward_speed * speed_boost
-      else
-        -- For ways with 0 speed but part of cycle network, give them basic speed
-        result.forward_speed = 5
-        result.backward_speed = 5
-        result.forward_mode = mode.cycling
-        result.backward_mode = mode.cycling
+        if (result.forward_speed < forward_speed) then
+          forward_speed = result.forward_speed
+        end
+        if (result.backward_speed < backward_speed) then
+          backward_speed = result.backward_speed
+        end
+        if forward_speed > 0 then
+          result.forward_speed = forward_speed * speed_boost
+          result.backward_speed = backward_speed * speed_boost
+        else
+          result.forward_speed = 5
+          result.backward_speed = 5
+          result.forward_mode = mode.cycling
+          result.backward_mode = mode.cycling
+        end
       end
     end
   end
