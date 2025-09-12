@@ -41,6 +41,40 @@ function is_road_surface(surface)
   return false
 end
 
+function isBridgePassable(data)
+  if not data.bridge then
+    return false
+  end
+
+  if data["disused:bridge"] == "yes" or data["abandoned:bridge"] == "yes" then
+    return false
+  end
+
+  if data.construction or data["bridge:construction"] then
+    return false
+  end
+
+  if data.access == "no" or data.access == "private" then
+    return false
+  end
+
+  if data.bicycle == "no" or data.bicycle == "dismount" then
+    return false
+  end
+
+  if data.bridge == "low_water_crossing" then
+    return true
+  end
+
+  if data.bridge == "movable" then
+    return true
+  end
+
+  return data.bridge == "yes" or data.bridge == "aqueduct" or data.bridge == "boardwalk" or
+         data.bridge == "cantilever" or data.bridge == "covered" or data.bridge == "trestle" or
+         data.bridge == "viaduct"
+end
+
 function isRoadBicycleAllowed(highway_tag, bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
   local allowed_bicycle_tags = {
     "yes",
@@ -128,7 +162,7 @@ function setup()
 
   return {
     properties = {
-      u_turn_penalty                = 20,
+      u_turn_penalty                = 1000,
       traffic_light_penalty         = 10,
       --weight_name                   = 'cyclability',
       weight_name                   = 'duration',
@@ -144,8 +178,9 @@ function setup()
     default_speed             = default_speed,
     walking_speed             = walking_speed,
     oneway_handling           = true,
-    turn_penalty              = 12,
-    turn_bias                 = 2.0,
+    turn_penalty              = 100,
+    --turn_bias                 = 2.0, -- right turns are more cheaper than left turns
+    turn_bias                 = 1.0,
     use_public_transport      = false,
 
     -- Exclude narrow ways, in particular to route with cargo bike
@@ -267,8 +302,8 @@ function setup()
 
     bicycle_speeds = {
       cycleway = default_speed * 1.2, --2mil
-      primary = default_speed / 2, --3.8mil
-      trunk = default_speed / 2, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
+      primary = default_speed, --3.8mil
+      trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
       trunk_link = default_speed,
       primary_link = 1, --469k
       secondary = default_speed, --5.4mil
@@ -315,10 +350,6 @@ function setup()
 
     route_speeds = {
       ferry = 0
-    },
-
-    bridge_speeds = {
-      movable = 5
     },
 
     surface_speeds = {
@@ -465,6 +496,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.amenity = way:get_value_by_key("amenity")
   data.public_transport = way:get_value_by_key("public_transport")
   data.bridge = way:get_value_by_key("bridge")
+  data.construction = way:get_value_by_key("construction")
 
   if (not data.highway or data.highway == '') and
   (not data.route or data.route == '') and
@@ -539,7 +571,6 @@ function speed_handler(profile,way,result,data)
   data.way_type_allows_pushing = false
   --DEBUG: if way:id() == 442985813 then
   -- speed
-  local bridge_speed = profile.bridge_speeds[data.bridge]
   local tracktype = data.tracktype
   local lanes = data.lanes and tonumber(data.lanes) or 0
 
@@ -560,7 +591,13 @@ function speed_handler(profile,way,result,data)
     speed = profile.default_speed
   end
 
-  if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and (data.maxspeed > 80))) then
+  if data.highway == "primary" or data.highway == "trunk" then
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  end
+
+  if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and data.maxspeed > 80)) then
+    -- setup 0.01 for all primary & trunk?
     result.forward_speed = 1
     result.backward_speed = 1
     result.forward_rate = 0.0001
@@ -617,8 +654,9 @@ function speed_handler(profile,way,result,data)
     if data.duration and durationIsValid(data.duration) then
       result.duration = math.max( parseDuration(data.duration), 1 )
     end
-    result.forward_speed = bridge_speed
-    result.backward_speed = bridge_speed
+  elseif isBridgePassable(data) then
+    result.forward_speed = 16
+    result.backward_speed = 16
     data.way_type_allows_pushing = true
   elseif tracktype and profile.tracktype_speeds[tracktype] then
     result.forward_speed = speed
@@ -1049,13 +1087,13 @@ function process_way(profile, way, result, relations)
 
   if relations then
     local is_good_cycling_infrastructure = false
-    
+
     if data.highway == "cycleway" then
       is_good_cycling_infrastructure = true
     elseif (data.highway == "track" or data.highway == "residential") and data.surface and is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/340134972 https://www.openstreetmap.org/way/100520383
       is_good_cycling_infrastructure = true
     end
-    
+
     if is_good_cycling_infrastructure then
       local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
       if speed_boost > 1.0 then
@@ -1084,11 +1122,36 @@ end
 
 
 function process_turn(profile, turn)
-  local normalized_angle = turn.angle / 90.0
-  if normalized_angle >= 0.0 then
-    turn.duration = normalized_angle * normalized_angle * profile.turn_penalty / profile.turn_bias
+  -- Don't apply turn penalty for going straight (angles close to 0 or 180)
+  -- Intersection - is 180 turn in OSRM
+  -- But U-turns should still get penalty
+  
+  local angle_abs = math.abs(turn.angle)
+  
+  -- No penalty for nearly straight movements (but not U-turns)
+  if angle_abs < 10 and not turn.is_u_turn then
+    turn.duration = 0
+    -- Don't return here, continue to handle traffic lights etc.
+  elseif angle_abs > 170 and not turn.is_u_turn then
+    -- Going straight through intersection (around 180 degrees)
+    turn.duration = 0
   else
-    turn.duration = normalized_angle * normalized_angle * profile.turn_penalty * profile.turn_bias
+    -- Progressive penalty based on turn angle
+    -- Small angles get small penalties, large angles get larger penalties
+    -- Using a more linear approach with slight exponential growth
+    
+    local angle_factor = angle_abs / 180.0  -- Normalize to 0-1
+    
+    local base_penalty = 80 * angle_factor * (1 + angle_factor)
+
+    -- Apply turn bias for left vs right turns
+    if turn.angle >= 0.0 then
+      -- Right turn
+      turn.duration = base_penalty / profile.turn_bias
+    else
+      -- Left turn
+      turn.duration = base_penalty * profile.turn_bias
+    end
   end
 
   if turn.is_u_turn then
