@@ -75,7 +75,7 @@ function isBridgePassable(data)
          data.bridge == "viaduct"
 end
 
-function isRoadBicycleAllowed(highway_tag, bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
+function isRoadBicycleAllowed(profile, highway_tag, bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
   local allowed_bicycle_tags = {
     "yes",
     "designated",
@@ -86,18 +86,6 @@ function isRoadBicycleAllowed(highway_tag, bicycle_tag, bicycle_road_tag, cycles
     "shoulder",
     "separate",
     "opposite"
-  }
-
-  local allowed_cycleway_tags = {
-    "lane",
-    "track",
-    "shared_lane",
-    "share_busway",
-    "shoulder",
-    "separate",
-    "opposite",
-    "opposite_lane",
-    "opposite_track"
   }
 
   if ("cycleway" == highway_tag) then
@@ -120,28 +108,16 @@ function isRoadBicycleAllowed(highway_tag, bicycle_tag, bicycle_road_tag, cycles
     return true
   end
 
-  if cycleway_tag then
-    for _, tag in ipairs(allowed_cycleway_tags) do
-      if cycleway_tag == tag then
-        return true
-      end
-    end
+  if cycleway_tag and profile.cycleway_tags[cycleway_tag] then
+    return true
   end
 
-  if cycleway_left_tag then
-    for _, tag in ipairs(allowed_cycleway_tags) do
-      if cycleway_left_tag == tag then
-        return true
-      end
-    end
+  if cycleway_left_tag and profile.cycleway_tags[cycleway_left_tag] then
+    return true
   end
 
-  if cycleway_right_tag then
-    for _, tag in ipairs(allowed_cycleway_tags) do
-      if cycleway_right_tag == tag then
-        return true
-      end
-    end
+  if cycleway_right_tag and profile.cycleway_tags[cycleway_right_tag] then
+    return true
   end
 
   return false
@@ -247,18 +223,30 @@ function setup()
     },
 
     cycleway_tags = Set {
---       'track',
       'lane',
+      'shared_lane',
       'share_busway',
-      'sharrow',
+      'track',
+      'separate',
+      'crossing',
+      'shoulder',
+      'link',
+      'traffic_island',
+      'asl',
+      'opposite',
+      'opposite_lane',
+      'opposite_share_busway',
+      'opposite_track',
       'shared',
-      'shared_lane'
+      'exclusive',
+      'advisory',
     },
 
     opposite_cycleway_tags = Set {
       'opposite',
       'opposite_lane',
       'opposite_track',
+      'opposite_share_busway'
     },
 
     cycleway_relation_types = Set {
@@ -628,7 +616,7 @@ function speed_handler(profile,way,result,data)
     result.backward_rate = 0.001
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (speed > 15) and isRoadBicycleAllowed(data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
+  elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
     if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
       result.forward_speed = profile.default_speed * cycleWayMultiplicator
@@ -647,12 +635,12 @@ function speed_handler(profile,way,result,data)
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
   elseif ((data.highway == "footway" or data.footway == "sidewalk") and (is_road_surface(data.surface))) then -- https://www.openstreetmap.org/way/664723821
-    result.forward_speed = 0.01
-    result.backward_speed = 0.01
-  elseif (bridge_speed and bridge_speed > 0) then
-    data.highway = data.bridge
-    if data.duration and durationIsValid(data.duration) then
-      result.duration = math.max( parseDuration(data.duration), 1 )
+    if data.bicycle == "designated" then
+      result.forward_speed = 1
+      result.backward_speed = 1
+    else
+      result.forward_speed = 0.01
+      result.backward_speed = 0.01
     end
   elseif isBridgePassable(data) then
     result.forward_speed = 16
