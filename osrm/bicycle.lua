@@ -289,6 +289,7 @@ function setup()
     },
 
     bicycle_speeds = {
+      motorway = 0,
       cycleway = default_speed * 1.2, --2mil
       primary = default_speed, --3.8mil
       trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
@@ -553,9 +554,10 @@ function handle_bicycle_tags(profile,way,result,data)
 end
 
 
-
 function speed_handler(profile,way,result,data)
-
+  if (data.highway == "motorway" or data.highway == "motorway_link") then
+    return;
+  end
   data.way_type_allows_pushing = false
   --DEBUG: if way:id() == 442985813 then
   -- speed
