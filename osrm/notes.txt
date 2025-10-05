@@ -1,0 +1,77 @@
+# ssh root@85.9.212.108
+
+# 1)
+tmux new -s 0
+mkdir osrm
+cd osrm
+curl -OL https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+
+# 2)
+sudo apt-get -y install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+DISTRO=$(grep "^ID=" /etc/os-release | cut -d '=' -f 2)
+
+if [[ "$DISTRO" == "ubuntu" ]]; then
+  echo "Using Ubuntu Docker repository"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(lsb_release -c | awk '{print $2}') stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+elif [[ "$DISTRO" == "debian" ]]; then
+  echo "Using Debian Docker repository"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(lsb_release -c | awk '{print $2}') stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+else
+  echo "Unsupported distribution: $DISTRO"
+  exit 1
+fi
+
+sudo apt-get update
+sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo rm -f /usr/local/bin/docker-compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo systemctl start docker
+sudo usermod -aG docker $USER
+sudo docker run hello-world
+
+
+sudo swapoff -a
+sudo fallocate -l 250G swap
+sudo chmod 600 swap
+sudo mkswap swap
+sudo swapon swap
+
+docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-extract -v
+
+apt -y install pipx
+pipx install telegram-send
+echo 'export PATH="$PATH:/home/charm/.local/bin"' >> ~/.bashrc
+/root/.local/bin/telegram-send --configure
+1093278356:AAE4RLde57ak9eQicn_nQuO1_nz0szxGgtc
+source ~/.bashrc
+
+# 3)
+tmux new -s 0
+
+date
+docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-extract -p /data/bicycle.lua /data/planet-latest.osm.pbf || echo "osrm-extract failed"
+/root/.local/bin/telegram-send "finished extract - delete original file please"
+
+docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition --max-cell-sizes=1024,16384,262144,4194304 /data/planet-latest.osrm || echo "osrm-partition failed"
+/root/.local/bin/telegram-send "finished partition"
+docker run --rm -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/planet-latest.osrm || echo "osrm-customize failed"
+/root/.local/bin/telegram-send "finished customize"
+
+sudo chmod 644 planet-latest.osrm.fileIndex
+date
+/root/.local/bin/telegram-send "Finished osrm build $(hostname)"
+echo XXX
+
+
+docker run --rm -t -i -p 8003:5000 -v "${PWD}:/data" --name osrm-backend ghcr.io/project-osrm/osrm-backend:v6.0.0 osrm-routed --algorithm mld --mmap on /data/planet-latest.osrm
+
+
+#hz2
+rsync -r --progress ~/osrm charm@88.99.161.250:/home/charm/disk/osrm_new

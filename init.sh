@@ -11,7 +11,8 @@ set -ex
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -y
 sudo apt-get -y install openssh-client openssh-server
-sudo apt-get -y install vim tmux maven tmux git postgresql xfsprogs lsof rsyslog snapd python3-pip pipx jq aha gdal-bin libgdal-dev tree
+sudo apt-get -y install vim tmux maven tmux git postgresql xfsprogs lsof rsyslog snapd python3-pip pipx jq aha gdal-bin libgdal-dev tree openjdk-21-jdk npm
+npm install -g @anthropic-ai/claude-code
 
 # Setup PostgreSQL database without interaction
 sudo -i -u postgres psql << EOF
