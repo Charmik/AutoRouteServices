@@ -11,6 +11,8 @@ find_access_tag = require("lib/access").find_access_tag
 limit = require("lib/maxspeed").limit
 Measure = require("lib/measure")
 
+LOW_SPEED = 0.1
+
 function is_road_surface(surface)
   if not surface then
     return false
@@ -302,9 +304,9 @@ function setup()
       residential = default_speed, --68mil
       living_street = default_speed, --2.2 mil
       road = default_speed, --43k
-      unclassified = 0.01, --18mil TODO: remove with bad surface?
+      unclassified = LOW_SPEED, --18mil TODO: remove with bad surface?
       service = 1,         --60 mil TODO: try with good surface
-      track = 0.01,        --28 mil
+      track = LOW_SPEED,        --28 mil
       path = 0,            --15mil
       footway = 0          --27 mil
     },
@@ -587,35 +589,35 @@ function speed_handler(profile,way,result,data)
   end
 
   if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and data.maxspeed > 80)) then
-    -- setup 0.01 for all primary & trunk?
+    -- setup LOW_SPEED for all primary & trunk?
     result.forward_speed = 1
     result.backward_speed = 1
-    result.forward_rate = 0.0001
-    result.backward_rate = 0.0001
+    result.forward_rate = LOW_SPEED
+    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif expressway == "yes" then
     -- Avoid expressways (high-speed roads similar to highways)
-    result.forward_speed = 0.01  -- Practically avoid
-    result.backward_speed = 0.01
-    result.forward_rate = 0.0001
-    result.backward_rate = 0.0001
+    result.forward_speed = LOW_SPEED  -- Practically avoid
+    result.backward_speed = LOW_SPEED
+    result.forward_rate = LOW_SPEED
+    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif nhs and (nhs == "yes" or nhs == "Interstate" or nhs == "STRAHNET") then
     -- Avoid NHS highways (major national highways with heavy traffic)
-    result.forward_speed = 0.01  -- Practically avoid
-    result.backward_speed = 0.01
-    result.forward_rate = 0.0001
-    result.backward_rate = 0.0001
+    result.forward_speed = LOW_SPEED  -- Practically avoid
+    result.backward_speed = LOW_SPEED
+    result.forward_rate = LOW_SPEED
+    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif hgv == "designated" then
     -- Heavily penalize designated truck routes
     result.forward_speed = 1
     result.backward_speed = 1
-    result.forward_rate = 0.001
-    result.backward_rate = 0.001
+    result.forward_rate = LOW_SPEED
+    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
@@ -641,8 +643,8 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = 1
       result.backward_speed = 1
     else
-      result.forward_speed = 0.01
-      result.backward_speed = 0.01
+      result.forward_speed = LOW_SPEED
+      result.backward_speed = LOW_SPEED
     end
   elseif isBridgePassable(data) then
     result.forward_speed = 16
@@ -713,8 +715,8 @@ function speed_handler(profile,way,result,data)
     local smoothness_speed = profile.smoothness_speeds[data.smoothness]
     if smoothness_speed == 0 then
       if is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/938099187 https://www.openstreetmap.org/way/454657895
-        result.forward_speed = 0.1
-        result.backward_speed = 0.1
+        result.forward_speed = LOW_SPEED
+        result.backward_speed = LOW_SPEED
       else
         result.forward_speed = 0
         result.backward_speed = 0
