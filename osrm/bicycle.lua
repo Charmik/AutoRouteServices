@@ -127,7 +127,7 @@ end
 
 function setup()
   local default_speed = 25
-  local walking_speed = 1
+  local walking_speed = LOW_SPEED
 
   mode = {
       inaccessible = 0,
@@ -142,6 +142,7 @@ function setup()
     properties = {
       u_turn_penalty                = 1000,
       traffic_light_penalty         = 10,
+--       traffic_light_penalty         = 30,
       --weight_name                   = 'cyclability',
       weight_name                   = 'duration',
       process_call_tagless_node     = false,
@@ -150,6 +151,7 @@ function setup()
       continue_straight_at_waypoint = false,
       mode_change_penalty           = 30,
       use_relations                 = true,
+      left_hand_driving             = false, -- default for most countries
     },
 
     default_mode              = mode.cycling,
@@ -529,6 +531,10 @@ function handle_bicycle_tags(profile,way,result,data)
   data.cyclestreet = way:get_value_by_key("cyclestreet")
   data.footway = way:get_value_by_key("footway")
   data.lanes = way:get_value_by_key("lanes")
+  data.segregated =  way:get_value_by_key("segregated")
+  data.name = way:get_value_by_key("name")
+  data.ref = way:get_value_by_key("ref")
+  data.lit = way:get_value_by_key("lit")
 
   --cycleway_handler(profile,way,result,data)
   speed_handler(profile,way,result,data)
@@ -560,11 +566,21 @@ function speed_handler(profile,way,result,data)
   if (data.highway == "motorway" or data.highway == "motorway_link") then
     return;
   end
+  if (data.route == "ferry") then
+    return;
+  end
   data.way_type_allows_pushing = false
   --DEBUG: if way:id() == 442985813 then
   -- speed
+
   local tracktype = data.tracktype
   local lanes = data.lanes and tonumber(data.lanes) or 0
+
+  local surface = data.surface
+  -- not tracktype
+  if (not surface and data.highway ~= "tracktype") and (data.name or data.ref) and (lanes > 0 or data.maxspeed > 0) then
+    surface = "asphalt"
+  end
 
   -- Check for NHS (major highways), HGV (truck traffic), and expressway tags
   local nhs = way:get_value_by_key("NHS")
@@ -573,13 +589,13 @@ function speed_handler(profile,way,result,data)
 
   local speed = profile.bicycle_speeds[data.highway] or 0
   if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
-      if data.surface and is_road_surface(data.surface) then
-        speed = profile.surface_speeds[data.surface]
+      if surface and is_road_surface(surface) then
+        speed = profile.surface_speeds[surface]
       else
         speed = profile.tracktype_speeds[tracktype]
       end
   end
-  if (data.highway == "path" and is_road_surface(data.surface)) then -- https://www.openstreetmap.org/way/1163443297
+  if (data.highway == "path" and is_road_surface(surface)) then -- https://www.openstreetmap.org/way/1163443297
     speed = profile.default_speed
   end
 
@@ -620,9 +636,13 @@ function speed_handler(profile,way,result,data)
     result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(data.surface) or is_road_surface(data.cycleway_surface)) then
+  elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
-    if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
+    if (data.highway == "cycleway" and (data.foot == "yes" and data.segregated == "no") and data.bicycle ~= "designated" and speed < profile.default_speed) then --https://www.openstreetmap.org/way/3677792
+      -- goog cycleways: https://www.openstreetmap.org/way/133749397 https://www.openstreetmap.org/way/133749411
+      result.forward_speed = profile.walking_speed
+      result.backward_speed = profile.walking_speed
+    elseif (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
       result.forward_speed = profile.default_speed * cycleWayMultiplicator
       result.backward_speed = profile.default_speed * cycleWayMultiplicator
     elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
@@ -632,14 +652,17 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = profile.default_speed
       result.backward_speed = profile.default_speed
     end
-  elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not data.surface) or is_road_surface(data.surface))) then
+  elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
-  elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(data.surface))) then
+  elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
-  elseif ((data.highway == "footway" or data.footway == "sidewalk") and (is_road_surface(data.surface))) then -- https://www.openstreetmap.org/way/664723821
-    if data.bicycle == "designated" then
+  elseif ((data.highway == "footway" or data.footway == "sidewalk") and (is_road_surface(surface))) then -- https://www.openstreetmap.org/way/664723821
+    if data.footway == "crossing" then -- https://www.openstreetmap.org/way/140957737
+      result.forward_speed = 0.001
+      result.backward_speed = 0.001
+    elseif data.bicycle == "designated" then
       result.forward_speed = 1
       result.backward_speed = 1
     else
@@ -687,34 +710,34 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = 5
     data.way_type_allows_pushing = true
   elseif profile.bicycle_speeds[data.highway] then
-    if speed >= profile.default_speed and not data.surface then
+    if speed >= profile.default_speed and not surface then
       if (data.highway == "cycleway" or data.bicycle == "designated") then
         speed = speed / 10
       else
         speed = speed / 20
       end
     end
-    if (data.surface and profile.surface_speeds[data.surface] and profile.surface_speeds[data.surface] < speed) then
-      speed = profile.surface_speeds[data.surface]
+    if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
+      speed = profile.surface_speeds[surface]
     end
     result.forward_speed = speed
     result.backward_speed = speed
     data.way_type_allows_pushing = true
-  elseif data.access and profile.access_tag_whitelist[data.access]  then
-    -- unknown way, but valid access tag
-    local speed = profile.default_speed
-    if not data.surface then
-      speed = speed / 3
-    end
-    result.forward_speed = speed
-    result.backward_speed = speed
-    data.way_type_allows_pushing = true
+--   elseif data.access and profile.access_tag_whitelist[data.access]  then -- https://www.openstreetmap.org/way/33475758
+--     -- unknown way, but valid access tag
+--     local speed = profile.default_speed
+--     if not data.surface then
+--       speed = speed / 3
+--     end
+--     result.forward_speed = speed
+--     result.backward_speed = speed
+--     data.way_type_allows_pushing = true
   end
 
   if data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil then
     local smoothness_speed = profile.smoothness_speeds[data.smoothness]
     if smoothness_speed == 0 then
-      if is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/938099187 https://www.openstreetmap.org/way/454657895
+      if is_road_surface(surface) then -- https://www.openstreetmap.org/way/938099187 https://www.openstreetmap.org/way/454657895
         result.forward_speed = LOW_SPEED
         result.backward_speed = LOW_SPEED
       else
@@ -832,6 +855,9 @@ function width_handler(profile,way,result,data)
 end
 
 function bike_push_handler(profile,way,result,data)
+  if (data.route == "ferry") then
+    return;
+  end
   -- pushing bikes - if no other mode found
   if result.forward_mode == mode.inaccessible or result.backward_mode == mode.inaccessible or
     result.forward_speed == -1 or result.backward_speed == -1 then
@@ -1072,6 +1098,9 @@ function process_way(profile, way, result, relations)
     -- set weight properties of the way
     WayHandlers.weights,
 
+    -- determine driving side (left/right) based on location
+    WayHandlers.driving_side,
+
     --Relations.process_way_refs(way, relations, result)
   }
 
@@ -1117,32 +1146,58 @@ function process_turn(profile, turn)
   -- Don't apply turn penalty for going straight (angles close to 0 or 180)
   -- Intersection - is 180 turn in OSRM
   -- But U-turns should still get penalty
-  
+
+--   print("Turn: angle=" .. turn.angle)
   local angle_abs = math.abs(turn.angle)
-  
-  -- No penalty for nearly straight movements (but not U-turns)
-  if angle_abs < 10 and not turn.is_u_turn then
+
+  -- Handle U-turns first with a simple base penalty
+  if turn.is_u_turn then
+    turn.duration = 1000
+  -- No penalty for nearly straight movements
+  elseif angle_abs < 10 then
     turn.duration = 0
-    -- Don't return here, continue to handle traffic lights etc.
-  elseif angle_abs > 170 and not turn.is_u_turn then
+  elseif angle_abs > 170 then
     -- Going straight through intersection (around 180 degrees)
     turn.duration = 0
   else
     -- Progressive penalty based on turn angle
     -- Small angles get small penalties, large angles get larger penalties
     -- Using a more linear approach with slight exponential growth
-    
+
     local angle_factor = angle_abs / 180.0  -- Normalize to 0-1
-    
-    local base_penalty = 80 * angle_factor * (1 + angle_factor)
+
+    local base_penalty = 120 * angle_factor * (1 + angle_factor)
+
+    -- Adjust turn bias based on driving side
+    -- In left-hand driving (UK, Cyprus, etc.): right turns cross traffic (more expensive)
+    -- In right-hand driving: left turns cross traffic (more expensive)
+    local is_left_hand_driving = turn.is_left_hand_driving
+    local source_number_of_lanes = turn.source_number_of_lanes or 1
+    if (source_number_of_lanes > 5) then
+      source_number_of_lanes = 5
+    end
 
     -- Apply turn bias for left vs right turns
     if turn.angle >= 0.0 then
       -- Right turn
-      turn.duration = base_penalty / profile.turn_bias
+--       print("Turn1: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
+      if is_left_hand_driving and source_number_of_lanes > 1 then
+        -- Right turns cross traffic in left-hand driving countries (UK, Cyprus, etc.)
+        turn.duration = base_penalty * profile.turn_bias * 2 * source_number_of_lanes
+      else
+        -- Right turns are easier in right-hand driving countries
+        turn.duration = base_penalty / profile.turn_bias
+      end
     else
       -- Left turn
-      turn.duration = base_penalty * profile.turn_bias
+--       print("Turn2: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
+      if not is_left_hand_driving and source_number_of_lanes > 1 then
+        -- Left turns cross traffic in right-hand driving countries
+        turn.duration = base_penalty * profile.turn_bias * 2 * source_number_of_lanes
+      else
+        -- Left turns are easier in left-hand driving countries
+        turn.duration = base_penalty / profile.turn_bias
+      end
     end
   end
 
@@ -1162,12 +1217,12 @@ function process_turn(profile, turn)
     turn.duration = turn.duration + 600
   end
 
-  if profile.properties.weight_name == 'cyclability' then
-    turn.weight = turn.duration
-  end
-  if turn.source_mode == mode.cycling and turn.target_mode ~= mode.cycling then
-    turn.weight = turn.weight + profile.properties.mode_change_penalty
-  end
+--   if profile.properties.weight_name == 'cyclability' then
+--     turn.weight = turn.duration
+--   end
+--   if turn.source_mode == mode.cycling and turn.target_mode ~= mode.cycling then
+--     turn.weight = turn.weight + profile.properties.mode_change_penalty
+--   end
 end
 
 return {
