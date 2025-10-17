@@ -309,8 +309,8 @@ function setup()
       unclassified = LOW_SPEED, --18mil TODO: remove with bad surface?
       service = 1,         --60 mil TODO: try with good surface
       track = LOW_SPEED,        --28 mil
-      path = 0,            --15mil
-      footway = 0          --27 mil
+      path = LOW_SPEED,            --15mil TODO: make LOW_SPEED
+      footway = LOW_SPEED          --27 mil TODO: make LOW_SPEED
     },
 
     pedestrian_speeds = {
@@ -360,14 +360,14 @@ function setup()
       ["cobblestone:flattened"] = 10,
       paving_stones = 10,
       ["paving_stones:lanes"] = 10,
-      compacted = 0,
+      compacted = LOW_SPEED,
       cobblestone = 6,
       unpaved = 0,
-      fine_gravel = 0,
-      gravel = 0,
-      pebblestone = 0,
+      fine_gravel = LOW_SPEED,
+      gravel = LOW_SPEED,
+      pebblestone = LOW_SPEED,
       grass_paver = 0,
-      ground = 0,
+      ground = LOW_SPEED,
       dirt = 0,
       earth = 0,
       grass = 0,
@@ -658,17 +658,6 @@ function speed_handler(profile,way,result,data)
   elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface))) then
     result.forward_speed = profile.default_speed
     result.backward_speed = profile.default_speed
-  elseif ((data.highway == "footway" or data.footway == "sidewalk") and (is_road_surface(surface))) then -- https://www.openstreetmap.org/way/664723821
-    if data.footway == "crossing" then -- https://www.openstreetmap.org/way/140957737
-      result.forward_speed = 0.001
-      result.backward_speed = 0.001
-    elseif data.bicycle == "designated" then
-      result.forward_speed = 1
-      result.backward_speed = 1
-    else
-      result.forward_speed = LOW_SPEED
-      result.backward_speed = LOW_SPEED
-    end
   elseif isBridgePassable(data) then
     result.forward_speed = 16
     result.backward_speed = 16
