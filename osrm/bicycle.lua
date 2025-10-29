@@ -1156,7 +1156,8 @@ function process_turn(profile, turn)
 
     local angle_factor = angle_abs / 180.0  -- Normalize to 0-1
 
-    local base_penalty = 180 * angle_factor * (1 + angle_factor)
+    -- TODO: make 180 & uncomment limit with MAX_TURN_PENALTY
+    local base_penalty = 120 * angle_factor * (1 + angle_factor)
 
     -- Adjust turn bias based on driving side
     -- In left-hand driving (UK, Cyprus, etc.): right turns cross traffic (more expensive)
@@ -1206,7 +1207,7 @@ function process_turn(profile, turn)
   elseif source_is_highway and not target_is_highway then
     turn.duration = turn.duration + 600
   end
-  turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
+  --turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
 
 --   if profile.properties.weight_name == 'cyclability' then
 --     turn.weight = turn.duration
