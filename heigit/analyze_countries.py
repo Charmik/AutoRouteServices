@@ -121,10 +121,10 @@ COUNTRIES = [
 #     ('indonesia', 'https://download.geofabrik.de/asia/indonesia-latest.osm.pbf'),
 #     ('iran', 'https://download.geofabrik.de/asia/iran-latest.osm.pbf'),
 #     ('iraq', 'https://download.geofabrik.de/asia/iraq-latest.osm.pbf'),
-#     ('israel-and-palestine', 'https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf'),
+    ('israel-and-palestine', 'https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf'),
     ('japan', 'https://download.geofabrik.de/asia/japan-latest.osm.pbf'),
 #     ('jordan', 'https://download.geofabrik.de/asia/jordan-latest.osm.pbf'),
-#     ('kazakhstan', 'https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf'),
+    ('kazakhstan', 'https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf'),
 #     ('kyrgyzstan', 'https://download.geofabrik.de/asia/kyrgyzstan-latest.osm.pbf'),
 #     ('laos', 'https://download.geofabrik.de/asia/laos-latest.osm.pbf'),
 #     ('lebanon', 'https://download.geofabrik.de/asia/lebanon-latest.osm.pbf'),
@@ -204,7 +204,7 @@ COUNTRIES = [
     ('germany', 'https://download.geofabrik.de/europe/germany-latest.osm.pbf'),
     ('greece', 'https://download.geofabrik.de/europe/greece-latest.osm.pbf'),
 #     ('guernsey-jersey', 'https://download.geofabrik.de/europe/guernsey-jersey-latest.osm.pbf'),
-#     ('hungary', 'https://download.geofabrik.de/europe/hungary-latest.osm.pbf'),
+    ('hungary', 'https://download.geofabrik.de/europe/hungary-latest.osm.pbf'),
 #     ('iceland', 'https://download.geofabrik.de/europe/iceland-latest.osm.pbf'),
 #     ('ireland-and-northern-ireland', 'https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf'),
 #     ('isle-of-man', 'https://download.geofabrik.de/europe/isle-of-man-latest.osm.pbf'),
@@ -215,9 +215,9 @@ COUNTRIES = [
 #     ('lithuania', 'https://download.geofabrik.de/europe/lithuania-latest.osm.pbf'),
 #     ('luxembourg', 'https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf'),
 #     ('macedonia', 'https://download.geofabrik.de/europe/macedonia-latest.osm.pbf'),
-#     ('malta', 'https://download.geofabrik.de/europe/malta-latest.osm.pbf'),
-#     ('moldova', 'https://download.geofabrik.de/europe/moldova-latest.osm.pbf'),
-#     ('monaco', 'https://download.geofabrik.de/europe/monaco-latest.osm.pbf'),
+    ('malta', 'https://download.geofabrik.de/europe/malta-latest.osm.pbf'),
+    ('moldova', 'https://download.geofabrik.de/europe/moldova-latest.osm.pbf'),
+    ('monaco', 'https://download.geofabrik.de/europe/monaco-latest.osm.pbf'),
     ('montenegro', 'https://download.geofabrik.de/europe/montenegro-latest.osm.pbf'),
     ('netherlands', 'https://download.geofabrik.de/europe/netherlands-latest.osm.pbf'),
     ('norway', 'https://download.geofabrik.de/europe/norway-latest.osm.pbf'),
@@ -225,7 +225,7 @@ COUNTRIES = [
     ('portugal', 'https://download.geofabrik.de/europe/portugal-latest.osm.pbf'),
     ('romania', 'https://download.geofabrik.de/europe/romania-latest.osm.pbf'),
 #     ('russia', 'https://download.geofabrik.de/russia-latest.osm.pbf'),
-#     ('serbia', 'https://download.geofabrik.de/europe/serbia-latest.osm.pbf'),
+    ('serbia', 'https://download.geofabrik.de/europe/serbia-latest.osm.pbf'),
     ('slovakia', 'https://download.geofabrik.de/europe/slovakia-latest.osm.pbf'),
     ('slovenia', 'https://download.geofabrik.de/europe/slovenia-latest.osm.pbf'),
     ('spain', 'https://download.geofabrik.de/europe/spain-latest.osm.pbf'),
@@ -267,41 +267,23 @@ COUNTRIES = [
 # SURFACE STATISTICS COLLECTOR (from file_surface_stats.py)
 # ============================================================================
 
-class SurfaceStatsCollector(osmium.SimpleHandler):
-    """Handler to collect surface statistics for highway ways"""
+def collect_surface_stats(pbf_file):
+    """Collect surface statistics for highway ways using optimized FileProcessor"""
+    stats = defaultdict(lambda: {'with_surface': 0, 'total': 0})
+    way_count = 0
+    highway_way_count = 0
 
-    def __init__(self):
-        super().__init__()
-        self.stats = defaultdict(lambda: {'with_surface': 0, 'total': 0})
-        self.highway_types = [
-            'primary', 'primary_link',
-            'trunk', 'trunk_link',
-            'secondary', 'secondary_link',
-            'tertiary', 'tertiary_link',
-            'residential',
-            'unclassified',
-            'living_street',
-            'pedestrian',
-            'pedestrian',
-            'service',
-            'track',
-            'cycleway'
-        ]
-        self.way_count = 0
-        self.highway_way_count = 0
+    # Use KeyFilter to pre-filter only highways at osmium C++ level
+    for o in osmium.FileProcessor(pbf_file).with_filter(osmium.filter.KeyFilter('highway')):
+        # Only process ways, not nodes or relations
+        if o.type_str() != 'w':
+            continue
 
-    def way(self, w):
-        """Process each way in the file"""
-        self.way_count += 1
+        way_count += 1
 
-        highway = None
-        has_surface = False
-
-        for tag in w.tags:
-            if tag.k == 'highway':
-                highway = tag.v
-            elif tag.k == 'surface':
-                has_surface = True
+        # Direct tag access (optimized)
+        highway = o.tags.get('highway')
+        has_surface = 'surface' in o.tags
 
         if highway:
             highway_normalized = highway
@@ -310,15 +292,17 @@ class SurfaceStatsCollector(osmium.SimpleHandler):
 
             if highway_normalized in ['primary', 'trunk', 'secondary', 'tertiary',
                                      'residential', 'unclassified', 'service', 'track', 'cycleway']:
-                self.highway_way_count += 1
-                self.stats[highway_normalized]['total'] += 1
+                highway_way_count += 1
+                stats[highway_normalized]['total'] += 1
 
                 if has_surface:
-                    self.stats[highway_normalized]['with_surface'] += 1
+                    stats[highway_normalized]['with_surface'] += 1
 
-        if self.way_count % 10000 == 0:
-            print(f"    Processed {self.way_count:,} ways ({self.highway_way_count:,} highway ways)...",
+        if way_count % 10000 == 0:
+            print(f"    Processed {way_count:,} highway ways ({highway_way_count:,} relevant highway ways)...",
                   end='\r', flush=True)
+
+    return stats, way_count, highway_way_count
 
 
 def calculate_percentage_without_surface(stats):
@@ -350,15 +334,13 @@ def analyze_pbf(pbf_file, country_name):
         print(f"    ✗ Error: File not found")
         return None
 
-    handler = SurfaceStatsCollector()
-
     try:
-        handler.apply_file(pbf_file, locations=False)
-        print(f"\r    ✓ Analyzed {handler.way_count:,} ways ({handler.highway_way_count:,} highway ways)" + " " * 20)
+        stats, way_count, highway_way_count = collect_surface_stats(pbf_file)
+        print(f"\r    ✓ Analyzed {way_count:,} highway ways ({highway_way_count:,} relevant highway ways)" + " " * 20)
 
         return {
             'country': country_name.capitalize(),
-            'stats': handler.stats,
+            'stats': stats,
             'filename': pbf_file
         }
     except Exception as e:
@@ -824,7 +806,7 @@ Examples:
             countries_processed += 1
 
             # Clean up .pbf files after successful CSV write
-            cleanup_pbf_files(pbf_file, modified_file)
+            # // TODO: UNCOMMENT cleanup_pbf_files(pbf_file, modified_file)
 
             print(f"\n✓ Completed: {country_name}")
 
