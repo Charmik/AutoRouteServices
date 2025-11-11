@@ -598,6 +598,9 @@ function speed_handler(profile,way,result,data)
   if (data.highway == "path" and is_road_surface(surface)) then -- https://www.openstreetmap.org/way/1163443297
     speed = profile.default_speed
   end
+  if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
+    speed = profile.surface_speeds[surface]
+  end
 
   if data.highway == "primary" or data.highway == "trunk" then
     result.forward_mode = mode.highway_cycling
@@ -610,6 +613,13 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = 1
     result.forward_rate = LOW_SPEED
     result.backward_rate = LOW_SPEED
+    result.forward_mode = mode.highway_cycling
+    result.backward_mode = mode.highway_cycling
+  elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed > 80 and speed == profile.default_speed) then
+    result.forward_speed = 5
+    result.backward_speed = 5
+    result.forward_rate = 5
+    result.backward_rate = 5
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif expressway == "yes" then
@@ -638,26 +648,26 @@ function speed_handler(profile,way,result,data)
     result.backward_mode = mode.highway_cycling
   elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
-    if (data.highway == "cycleway" and (data.foot == "yes" and data.segregated == "no") and data.bicycle ~= "designated" and speed < profile.default_speed) then --https://www.openstreetmap.org/way/3677792
+    if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
+      result.forward_speed = speed * cycleWayMultiplicator
+      result.backward_speed = speed * cycleWayMultiplicator
+    elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
+      result.forward_speed = speed * cycleWayMultiplicator
+      result.backward_speed = speed * cycleWayMultiplicator
+    else --https://www.openstreetmap.org/way/970634864
+      result.forward_speed = speed
+      result.backward_speed = speed
+    end
+    elseif (data.highway == "cycleway" and (data.foot == "yes" and data.segregated == "no") and data.bicycle ~= "designated" and speed < profile.default_speed) then --https://www.openstreetmap.org/way/3677792
       -- goog cycleways: https://www.openstreetmap.org/way/133749397 https://www.openstreetmap.org/way/133749411
       result.forward_speed = profile.walking_speed
       result.backward_speed = profile.walking_speed
-    elseif (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
-      result.forward_speed = profile.default_speed * cycleWayMultiplicator
-      result.backward_speed = profile.default_speed * cycleWayMultiplicator
-    elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
-      result.forward_speed = profile.default_speed * cycleWayMultiplicator
-      result.backward_speed = profile.default_speed * cycleWayMultiplicator
-    else --https://www.openstreetmap.org/way/970634864
-      result.forward_speed = profile.default_speed
-      result.backward_speed = profile.default_speed
-    end
   elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
-    result.forward_speed = profile.default_speed
-    result.backward_speed = profile.default_speed
+    result.forward_speed = profile.surface_speeds[surface]
+    result.backward_speed = profile.surface_speeds[surface]
   elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface))) then
-    result.forward_speed = profile.default_speed
-    result.backward_speed = profile.default_speed
+    result.forward_speed = profile.surface_speeds[surface]
+    result.backward_speed = profile.surface_speeds[surface]
   elseif isBridgePassable(data) then
     result.forward_speed = 16
     result.backward_speed = 16
@@ -693,6 +703,16 @@ function speed_handler(profile,way,result,data)
     -- parking areas
     result.forward_speed = profile.amenity_speeds[data.amenity]
     result.backward_speed = profile.amenity_speeds[data.amenity]
+    data.way_type_allows_pushing = true
+  elseif (data.highway == "footway" or data.highway == "path") and data.bicycle == "designated" and is_road_surface(surface) then --https://www.openstreetmap.org/way/704522241
+    -- Segregated bicycle paths tagged as footway/path with designated access and good surface
+    -- These are good cycling infrastructure similar to cycleways
+    local base_speed = profile.surface_speeds[surface]
+    if base_speed == profile.default_speed then
+      base_speed = base_speed * 2
+    end
+    result.forward_speed = base_speed
+    result.backward_speed = base_speed
     data.way_type_allows_pushing = true
   elseif data.highway == "footway" and data.bicycle == "permissive" then --https://www.openstreetmap.org/way/249681202
     result.forward_speed = 5
