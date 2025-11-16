@@ -669,8 +669,17 @@ function speed_handler(profile,way,result,data)
     result.forward_speed = profile.surface_speeds[surface]
     result.backward_speed = profile.surface_speeds[surface]
   elseif isBridgePassable(data) then
-    result.forward_speed = 16
-    result.backward_speed = 16
+    if (data.highway == "footway" and data.bicycle == "designated") then
+      result.forward_speed = 16
+      result.backward_speed = 16
+    elseif (data.highway == "footway") then
+      result.forward_speed = LOW_SPEED
+      result.backward_speed = LOW_SPEED
+    else
+      result.forward_speed = 16
+      result.backward_speed = 16
+    end
+
     data.way_type_allows_pushing = true
   elseif tracktype and profile.tracktype_speeds[tracktype] then
     result.forward_speed = speed
