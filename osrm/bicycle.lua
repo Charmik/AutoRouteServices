@@ -398,9 +398,10 @@ function setup()
     smoothness_speeds = {
       excellent = default_speed,
       good = default_speed,
+      very_good = default_speed,
       intermediate = default_speed,
-      bad = 0,
-      very_bad = 0,
+      bad = LOW_SPEED,
+      very_bad = LOW_SPEED,
       horrible = 0,
       very_horrible = 0,
       impassable = 0
@@ -615,13 +616,12 @@ function speed_handler(profile,way,result,data)
     result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed > 80 and speed == profile.default_speed) then
-    result.forward_speed = 5
-    result.backward_speed = 5
-    result.forward_rate = 5
-    result.backward_rate = 5
-    result.forward_mode = mode.highway_cycling
-    result.backward_mode = mode.highway_cycling
+  elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed > 80 and speed == profile.default_speed) then -- # validate on 31399133 & 143101601
+    local lowerSpeed = 5
+    result.forward_speed = lowerSpeed
+    result.backward_speed = lowerSpeed
+    result.forward_rate = lowerSpeed
+    result.backward_rate = lowerSpeed
   elseif expressway == "yes" then
     -- Avoid expressways (high-speed roads similar to highways)
     result.forward_speed = LOW_SPEED  -- Practically avoid
