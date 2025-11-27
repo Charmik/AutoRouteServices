@@ -1236,6 +1236,7 @@ function process_turn(profile, turn)
   elseif source_is_highway and not target_is_highway then
     turn.duration = turn.duration + 600
   end
+  -- TODO: uncomment
   --turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
 
 --   if profile.properties.weight_name == 'cyclability' then
