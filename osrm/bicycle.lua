@@ -316,7 +316,7 @@ function setup()
     pedestrian_speeds = {
       footway = walking_speed,
       pedestrian = walking_speed,
-      steps = 1
+      steps = walking_speed -- https://www.openstreetmap.org/way/25838958
     },
 
     railway_speeds = {
@@ -663,9 +663,9 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = profile.walking_speed
       result.backward_speed = profile.walking_speed
   elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
-    result.forward_speed = profile.surface_speeds[surface]
-    result.backward_speed = profile.surface_speeds[surface]
-  elseif ((data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface))) then
+    result.forward_speed = profile.surface_speeds[surface] or speed
+    result.backward_speed = profile.surface_speeds[surface] or speed
+  elseif (data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface)) then
     result.forward_speed = profile.surface_speeds[surface]
     result.backward_speed = profile.surface_speeds[surface]
   elseif isBridgePassable(data) then
@@ -673,13 +673,14 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = 16
       result.backward_speed = 16
     elseif (data.highway == "footway") then
-      result.forward_speed = LOW_SPEED
-      result.backward_speed = LOW_SPEED
+      -- https://www.openstreetmap.org/way/352605114 - shouldn't use because we have road
+      -- https://www.openstreetmap.org/way/42965975 - should use - the only way
+      result.forward_speed = 2
+      result.backward_speed = 2
     else
       result.forward_speed = 16
       result.backward_speed = 16
     end
-
     data.way_type_allows_pushing = true
   elseif tracktype and profile.tracktype_speeds[tracktype] then
     result.forward_speed = speed
