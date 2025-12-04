@@ -308,7 +308,7 @@ function setup()
       road = default_speed, --43k
       unclassified = LOW_SPEED, --18mil TODO: remove with bad surface?
       service = 1,         --60 mil TODO: try with good surface
-      track = LOW_SPEED,        --28 mil
+      track = LOW_SPEED,        --28 mil TODO: can be default_speed but need to check wrong ways as 264929374
       path = LOW_SPEED,            --15mil TODO: make LOW_SPEED
       footway = LOW_SPEED          --27 mil TODO: make LOW_SPEED
     },
