@@ -565,10 +565,19 @@ end
 
 function speed_handler(profile,way,result,data)
   if (data.highway == "motorway" or data.highway == "motorway_link") then
+    result.forward_speed = 0
+    result.backward_speed = 0
     return;
   end
   if (data.route == "ferry") then
+    result.forward_speed = 0
+    result.backward_speed = 0
     return;
+  end
+  if way:get_value_by_key("seasonal") == "yes" then
+    result.forward_speed = 0
+    result.backward_speed = 0
+    return
   end
   data.way_type_allows_pushing = false
   --DEBUG: if way:id() == 442985813 then
