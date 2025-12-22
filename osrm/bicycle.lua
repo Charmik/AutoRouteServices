@@ -621,38 +621,28 @@ function speed_handler(profile,way,result,data)
     -- setup LOW_SPEED for all primary & trunk?
     result.forward_speed = 1
     result.backward_speed = 1
-    result.forward_rate = LOW_SPEED
-    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed > 80 and speed == profile.default_speed) then -- # validate on 31399133 & 143101601
     local lowerSpeed = 5
     result.forward_speed = lowerSpeed
     result.backward_speed = lowerSpeed
-    result.forward_rate = lowerSpeed
-    result.backward_rate = lowerSpeed
   elseif expressway == "yes" then
     -- Avoid expressways (high-speed roads similar to highways)
     result.forward_speed = LOW_SPEED  -- Practically avoid
     result.backward_speed = LOW_SPEED
-    result.forward_rate = LOW_SPEED
-    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif nhs and (nhs == "yes" or nhs == "Interstate" or nhs == "STRAHNET") then
     -- Avoid NHS highways (major national highways with heavy traffic)
     result.forward_speed = LOW_SPEED  -- Practically avoid
     result.backward_speed = LOW_SPEED
-    result.forward_rate = LOW_SPEED
-    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif hgv == "designated" then
     -- Heavily penalize designated truck routes
     result.forward_speed = 1
     result.backward_speed = 1
-    result.forward_rate = LOW_SPEED
-    result.backward_rate = LOW_SPEED
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
   elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
