@@ -11,7 +11,7 @@ find_access_tag = require("lib/access").find_access_tag
 limit = require("lib/maxspeed").limit
 Measure = require("lib/measure")
 
-LOW_SPEED = 0.1
+LOW_SPEED = 0.5
 
 function is_road_surface(surface)
   if not surface then
@@ -77,7 +77,14 @@ function isBridgePassable(data)
          data.bridge == "viaduct"
 end
 
-function isRoadBicycleAllowed(profile, highway_tag, bicycle_tag, bicycle_road_tag, cyclestreet_tag, cycleway_tag, cycleway_left_tag, cycleway_right_tag)
+function isRoadBicycleAllowed(profile, data)
+  local bicycle = data.bicycle
+  local bicycle_road = data.bicycle_road
+  local cyclestreet = data.cyclestreet
+  local cycleway = data.cycleway
+  local cycleway_left = data.cycleway_left
+  local cycleway_right = data.cycleway_right
+
   local allowed_bicycle_tags = {
     "yes",
     "designated",
@@ -90,35 +97,31 @@ function isRoadBicycleAllowed(profile, highway_tag, bicycle_tag, bicycle_road_ta
     "opposite"
   }
 
-  if ("cycleway" == highway_tag) then
-    return true
-  end
-
-  if bicycle_tag then
+  if bicycle then
     for _, tag in ipairs(allowed_bicycle_tags) do
-      if bicycle_tag == tag then
+      if bicycle == tag then
         return true
       end
     end
   end
 
-  if bicycle_road_tag == "yes" then
+  if bicycle_road == "yes" then
     return true
   end
 
-  if cyclestreet_tag == "yes" then
+  if cyclestreet == "yes" then
     return true
   end
 
-  if cycleway_tag and profile.cycleway_tags[cycleway_tag] then
+  if cycleway and profile.cycleway_tags[cycleway] then
     return true
   end
 
-  if cycleway_left_tag and profile.cycleway_tags[cycleway_left_tag] then
+  if cycleway_left and profile.cycleway_tags[cycleway_left] then
     return true
   end
 
-  if cycleway_right_tag and profile.cycleway_tags[cycleway_right_tag] then
+  if cycleway_right and profile.cycleway_tags[cycleway_right] then
     return true
   end
 
@@ -298,7 +301,7 @@ function setup()
       primary = default_speed, --3.8mil
       trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
       trunk_link = default_speed,
-      primary_link = 1, --469k
+      primary_link = LOW_SPEED, --469k
       secondary = default_speed, --5.4mil
       secondary_link = default_speed, --366k
       tertiary = default_speed, --8.5mil
@@ -307,7 +310,7 @@ function setup()
       living_street = default_speed, --2.2 mil
       road = default_speed, --43k
       unclassified = LOW_SPEED, --18mil TODO: remove with bad surface?
-      service = 1,         --60 mil TODO: try with good surface
+      service = LOW_SPEED,         --60 mil TODO: try with good surface
       track = LOW_SPEED,        --28 mil TODO: can be default_speed but need to check wrong ways as 264929374
       path = LOW_SPEED,            --15mil TODO: make LOW_SPEED
       footway = LOW_SPEED          --27 mil TODO: make LOW_SPEED
@@ -355,13 +358,13 @@ function setup()
       ["concrete:lanes"] = default_speed,
       tarmac = default_speed,
       sealed = default_speed,
-      wood = 10,
-      metal = 10,
-      ["cobblestone:flattened"] = 10,
-      paving_stones = 10,
-      ["paving_stones:lanes"] = 10,
+      wood = LOW_SPEED,
+      metal = LOW_SPEED,
+      ["cobblestone:flattened"] = LOW_SPEED,
+      paving_stones = 5,
+      ["paving_stones:lanes"] = LOW_SPEED,
       compacted = LOW_SPEED,
-      cobblestone = 6,
+      cobblestone = LOW_SPEED,
       unpaved = 0,
       fine_gravel = LOW_SPEED,
       gravel = LOW_SPEED,
@@ -374,7 +377,7 @@ function setup()
       mud = 0,
       sand = 0,
       woodchips = 0,
-      sett = 6
+      sett = LOW_SPEED
     },
 
     classes = Sequence {
@@ -401,6 +404,7 @@ function setup()
       very_good = default_speed,
       intermediate = default_speed,
       bad = LOW_SPEED,
+      -- https://www.openstreetmap.org/way/25809230 - can't ride here
       very_bad = LOW_SPEED,
       horrible = 0,
       very_horrible = 0,
@@ -465,21 +469,243 @@ function process_node(profile, node, result)
   result.traffic_lights = TrafficSignal.get_value(node)
 end
 
-local function parse_maxspeed(way)
-    local max_speed = way:get_value_by_key ("maxspeed")
-    local max_speed_type = way:get_value_by_key ("maxspeed:type")
+-- Country-specific speed limits from https://wiki.openstreetmap.org/wiki/Key:maxspeed
+-- Format: country_speeds["CC:zone"] = speed_in_kmh
+local country_speeds = {
+    -- Argentina
+    ["AR:urban"] = 40,
+    ["AR:rural"] = 110,
+    ["AR:motorway"] = 130,
+    -- Austria
+    ["AT:urban"] = 50,
+    ["AT:rural"] = 100,
+    ["AT:motorway"] = 130,
+    ["AT:bicycle_road"] = 30,
+    -- Belarus
+    ["BY:urban"] = 60,
+    ["BY:rural"] = 90,
+    ["BY:motorway"] = 110,
+    ["BY:living_street"] = 20,
+    -- Belgium
+    ["BE:urban"] = 50,
+    ["BE:rural"] = 70,
+    ["BE:motorway"] = 120,
+    ["BE:zone30"] = 30,
+    -- Bulgaria
+    ["BG:urban"] = 50,
+    ["BG:rural"] = 90,
+    ["BG:motorway"] = 140,
+    ["BG:living_street"] = 20,
+    -- Czech Republic
+    ["CZ:urban"] = 50,
+    ["CZ:rural"] = 90,
+    ["CZ:motorway"] = 130,
+    ["CZ:living_street"] = 20,
+    ["CZ:trunk"] = 110,
+    -- Denmark
+    ["DK:urban"] = 50,
+    ["DK:rural"] = 80,
+    ["DK:motorway"] = 130,
+    -- Estonia
+    ["EE:urban"] = 50,
+    ["EE:rural"] = 90,
+    -- Finland
+    ["FI:urban"] = 50,
+    ["FI:rural"] = 80,
+    -- France
+    ["FR:urban"] = 50,
+    ["FR:rural"] = 80,
+    ["FR:motorway"] = 130,
+    ["FR:zone30"] = 30,
+    -- Germany (none = no limit, we use 150 as practical limit)
+    ["DE:urban"] = 50,
+    ["DE:rural"] = 100,
+    ["DE:motorway"] = 150,
+    ["DE:living_street"] = 7,
+    ["DE:zone30"] = 30,
+    ["DE:zone20"] = 20,
+    ["DE:bicycle_road"] = 30,
+    -- Great Britain (stored in km/h, original is mph)
+    ["GB:urban"] = 48,      -- 30 mph
+    ["GB:rural"] = 97,      -- 60 mph
+    ["GB:motorway"] = 113,  -- 70 mph
+    ["GB:nsl_single"] = 97, -- 60 mph national speed limit single carriageway
+    ["GB:nsl_dual"] = 113,  -- 70 mph national speed limit dual carriageway
+    -- Greece
+    ["GR:urban"] = 50,
+    ["GR:rural"] = 90,
+    ["GR:motorway"] = 130,
+    ["GR:living_street"] = 20,
+    -- Hungary
+    ["HU:urban"] = 50,
+    ["HU:rural"] = 90,
+    ["HU:motorway"] = 130,
+    ["HU:living_street"] = 20,
+    ["HU:trunk"] = 110,
+    -- Israel
+    ["IL:urban"] = 50,
+    ["IL:rural"] = 80,
+    ["IL:motorway"] = 110,
+    ["IL:living_street"] = 30,
+    -- India
+    ["IN:urban"] = 70,
+    ["IN:rural"] = 70,
+    ["IN:motorway"] = 120,
+    -- Indonesia
+    ["ID:urban"] = 50,
+    ["ID:rural"] = 80,
+    ["ID:motorway"] = 100,
+    ["ID:residential"] = 30,
+    -- Italy
+    ["IT:urban"] = 50,
+    ["IT:rural"] = 90,
+    ["IT:motorway"] = 130,
+    ["IT:trunk"] = 110,
+    -- Japan
+    ["JP:rural"] = 60,
+    ["JP:motorway"] = 100,
+    ["JP:nsl"] = 60,
+    -- South Korea
+    ["KR:urban"] = 50,
+    ["KR:rural"] = 60,
+    ["KR:motorway"] = 80,
+    ["KR:trunk"] = 80,
+    -- Latvia
+    ["LV:urban"] = 50,
+    ["LV:rural"] = 90,
+    -- Lithuania
+    ["LT:urban"] = 50,
+    ["LT:rural"] = 90,
+    ["LT:motorway"] = 130,
+    -- Netherlands
+    ["NL:urban"] = 50,
+    ["NL:rural"] = 80,
+    ["NL:motorway"] = 130,
+    ["NL:living_street"] = 15,
+    ["NL:zone30"] = 30,
+    -- Norway
+    ["NO:urban"] = 50,
+    ["NO:rural"] = 80,
+    -- Philippines
+    ["PH:urban"] = 40,
+    ["PH:rural"] = 80,
+    ["PH:motorway"] = 100,
+    -- Poland
+    ["PL:urban"] = 50,
+    ["PL:rural"] = 90,
+    ["PL:motorway"] = 140,
+    ["PL:trunk"] = 120,
+    ["PL:living_street"] = 20,
+    ["PL:zone30"] = 30,
+    -- Portugal
+    ["PT:urban"] = 50,
+    ["PT:rural"] = 90,
+    ["PT:motorway"] = 120,
+    ["PT:trunk"] = 100,
+    -- Romania
+    ["RO:urban"] = 50,
+    ["RO:rural"] = 90,
+    ["RO:motorway"] = 130,
+    ["RO:trunk"] = 100,
+    -- Russia
+    ["RU:urban"] = 60,
+    ["RU:rural"] = 90,
+    ["RU:motorway"] = 110,
+    ["RU:living_street"] = 20,
+    -- Serbia
+    ["RS:urban"] = 50,
+    ["RS:rural"] = 80,
+    ["RS:motorway"] = 130,
+    ["RS:trunk"] = 100,
+    -- Slovakia
+    ["SK:urban"] = 50,
+    ["SK:rural"] = 90,
+    ["SK:motorway"] = 130,
+    ["SK:living_street"] = 20,
+    ["SK:trunk"] = 130,
+    -- Slovenia
+    ["SI:urban"] = 50,
+    ["SI:rural"] = 90,
+    ["SI:motorway"] = 130,
+    ["SI:trunk"] = 110,
+    -- South Africa
+    ["ZA:urban"] = 60,
+    ["ZA:rural"] = 100,
+    ["ZA:motorway"] = 120,
+    -- Spain
+    ["ES:urban"] = 50,
+    ["ES:rural"] = 90,
+    ["ES:motorway"] = 120,
+    ["ES:living_street"] = 20,
+    ["ES:zone30"] = 30,
+    ["ES:trunk"] = 100,
+    -- Sweden
+    ["SE:urban"] = 50,
+    ["SE:rural"] = 70,
+    -- Switzerland
+    ["CH:urban"] = 50,
+    ["CH:rural"] = 80,
+    ["CH:motorway"] = 120,
+    ["CH:trunk"] = 100,
+    -- Turkey
+    ["TR:urban"] = 50,
+    ["TR:rural"] = 90,
+    ["TR:motorway"] = 120,
+    ["TR:living_street"] = 20,
+    -- Ukraine
+    ["UA:urban"] = 50,
+    ["UA:rural"] = 90,
+    ["UA:motorway"] = 130,
+    ["UA:living_street"] = 20,
+    -- Uzbekistan
+    ["UZ:urban"] = 70,
+    ["UZ:rural"] = 100,
+    ["UZ:motorway"] = 110,
+    ["UZ:living_street"] = 30,
+}
 
-    if (max_speed and string.match(max_speed, "^%w%w:urban$")) then
-        return 50
-    elseif (max_speed_type and string.match(max_speed_type, "^%w%w:urban$")) then
-        return 50
-    elseif (max_speed and string.match(max_speed, "^%w%w:rural$")) then
-        return 101
-    elseif (max_speed_type and string.match(max_speed_type, "^%w%w:rural$")) then
-        return 101
-    else
-        return Measure.get_max_speed(max_speed) or 0
+local function parse_maxspeed(way)
+    local max_speed = way:get_value_by_key("maxspeed")
+    local max_speed_type = way:get_value_by_key("maxspeed:type")
+
+    -- Try maxspeed tag first, then maxspeed:type
+    local speed_value = max_speed or max_speed_type
+    if not speed_value then
+        return 0
     end
+
+    -- Handle "none" (e.g., German autobahn advisory speed)
+    if speed_value == "none" then
+        return 150
+    end
+
+    -- Handle "walk" or "walking" (living streets)
+    if speed_value == "walk" or speed_value == "walking" then
+        return 6
+    end
+
+    -- Handle country:zone format (e.g., "DE:urban", "RU:motorway")
+    local country_zone = string.upper(speed_value)
+    if country_speeds[country_zone] then
+        return country_speeds[country_zone]
+    end
+
+    -- Handle numeric values with optional units
+    local num, unit = string.match(speed_value, "^(%d+)%s*(%a*)$")
+    if num then
+        local speed = tonumber(num)
+        if unit == "mph" then
+            return math.floor(speed * 1.609344 + 0.5)
+        elseif unit == "knots" then
+            return math.floor(speed * 1.852 + 0.5)
+        else
+            -- Default is km/h
+            return speed
+        end
+    end
+
+    -- Fallback to OSRM's built-in parser
+    return Measure.get_max_speed(max_speed) or 0
 end
 
 function handle_bicycle_tags(profile,way,result,data)
@@ -608,6 +834,7 @@ function speed_handler(profile,way,result,data)
   if (data.highway == "path" and is_road_surface(surface)) then -- https://www.openstreetmap.org/way/1163443297
     speed = profile.default_speed
   end
+  -- it always decrease cycleway speeds
   if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
     speed = profile.surface_speeds[surface]
   end
@@ -617,13 +844,15 @@ function speed_handler(profile,way,result,data)
     result.backward_mode = mode.highway_cycling
   end
 
-  if ((data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and data.maxspeed > 80)) then
+  if (data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and data.maxspeed > 80) then
     -- setup LOW_SPEED for all primary & trunk?
     result.forward_speed = 1
     result.backward_speed = 1
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed > 80 and speed == profile.default_speed) then -- # validate on 31399133 & 143101601
+  elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed >= 100 and speed == profile.default_speed) then
+    -- # validate on 31399133 & 143101601
+    --https://www.openstreetmap.org/way/124997720
     local lowerSpeed = 5
     result.forward_speed = lowerSpeed
     result.backward_speed = lowerSpeed
@@ -645,7 +874,7 @@ function speed_handler(profile,way,result,data)
     result.backward_speed = 1
     result.forward_mode = mode.highway_cycling
     result.backward_mode = mode.highway_cycling
-  elseif (speed > 15) and isRoadBicycleAllowed(profile, data.highway, data.bicycle, data.bicycle_road, data.cyclestreet, data.cycleway, data.cycleway_left, data.cycleway_right) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
+  elseif (speed >= profile.default_speed) and isRoadBicycleAllowed(profile, data) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
     local cycleWayMultiplicator = 2
     if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
       result.forward_speed = speed * cycleWayMultiplicator
@@ -657,10 +886,6 @@ function speed_handler(profile,way,result,data)
       result.forward_speed = speed
       result.backward_speed = speed
     end
-    elseif (data.highway == "cycleway" and (data.foot == "yes" and data.segregated == "no") and data.bicycle ~= "designated" and speed < profile.default_speed) then --https://www.openstreetmap.org/way/3677792
-      -- goog cycleways: https://www.openstreetmap.org/way/133749397 https://www.openstreetmap.org/way/133749411
-      result.forward_speed = profile.walking_speed
-      result.backward_speed = profile.walking_speed
   elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
     result.forward_speed = profile.surface_speeds[surface] or speed
     result.backward_speed = profile.surface_speeds[surface] or speed
@@ -674,8 +899,8 @@ function speed_handler(profile,way,result,data)
     elseif (data.highway == "footway") then
       -- https://www.openstreetmap.org/way/352605114 - shouldn't use because we have road
       -- https://www.openstreetmap.org/way/42965975 - should use - the only way
-      result.forward_speed = 2
-      result.backward_speed = 2
+      result.forward_speed = LOW_SPEED
+      result.backward_speed = LOW_SPEED
     else
       result.forward_speed = 16
       result.backward_speed = 16
@@ -727,12 +952,20 @@ function speed_handler(profile,way,result,data)
     result.forward_speed = 5
     result.backward_speed = 5
     data.way_type_allows_pushing = true
+  elseif data.cycleway == "sidewalk" and data.foot == "yes" then
+    result.forward_speed = LOW_SPEED
+    result.backward_speed = LOW_SPEED
+  elseif data.highway == "cycleway" and data.foot == "yes" and data.segregated == "no" and data.bicycle ~= "designated" and speed < profile.default_speed then
+    -- https://www.openstreetmap.org/way/3677792
+    -- good cycleways: https://www.openstreetmap.org/way/133749397 https://www.openstreetmap.org/way/133749411
+    result.forward_speed = profile.walking_speed
+    result.backward_speed = profile.walking_speed
   elseif profile.bicycle_speeds[data.highway] then
     if speed >= profile.default_speed and not surface then
       if (data.highway == "cycleway" or data.bicycle == "designated") then
-        speed = speed / 10
+        speed = profile.walking_speed * 2
       else
-        speed = speed / 20
+        speed = profile.walking_speed
       end
     end
     if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
@@ -763,6 +996,11 @@ function speed_handler(profile,way,result,data)
         result.backward_speed = 0
       end
     end
+  end
+
+  if not isRoadBicycleAllowed(profile, data) and result.forward_speed > 0 and (lanes >= 3 or (lanes >= 2 and data.oneway == "yes" and data.maxspeed >= 80 and (data.highway == "primary" or data.highway == "trunk"))) then
+    result.forward_speed = result.forward_speed / 10
+    result.backward_speed = result.backward_speed / 10
   end
 
   -- Boost roads that explicitly prohibit trucks (likely quieter for cycling)
@@ -1162,6 +1400,9 @@ end
 
 function process_turn(profile, turn)
   local MAX_TURN_PENALTY = 2000
+  if turn.source_speed > profile.default_speed or turn.target_speed > profile.default_speed then
+    MAX_TURN_PENALTY = 30
+  end
   -- Don't apply turn penalty for going straight (angles close to 0 or 180)
   -- Intersection - is 180 turn in OSRM
   -- But U-turns should still get penalty
@@ -1236,8 +1477,7 @@ function process_turn(profile, turn)
   elseif source_is_highway and not target_is_highway then
     turn.duration = turn.duration + 600
   end
-  -- TODO: uncomment
-  --turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
+  turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
 
 --   if profile.properties.weight_name == 'cyclability' then
 --     turn.weight = turn.duration
