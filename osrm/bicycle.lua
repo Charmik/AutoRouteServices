@@ -300,8 +300,8 @@ function setup()
       cycleway = default_speed * 1.2, --2mil
       primary = default_speed, --3.8mil
       trunk = default_speed, --1.8mil TODO: make it low - test in SPB and other areas. check roads in overpass
-      trunk_link = default_speed,
-      primary_link = default_speed, --469k
+      trunk_link = default_speed / 3,
+      primary_link = default_speed / 3, --469k
       secondary = default_speed, --5.4mil
       secondary_link = default_speed, --366k
       tertiary = default_speed, --8.5mil
