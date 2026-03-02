@@ -309,7 +309,7 @@ function setup()
       residential = default_speed, --68mil
       living_street = default_speed, --2.2 mil
       road = default_speed, --43k
-      unclassified = LOW_SPEED, --18mil TODO: remove with bad surface?
+      unclassified = default_speed, --18mil
       service = LOW_SPEED,         --60 mil TODO: try with good surface
       track = LOW_SPEED,        --28 mil TODO: can be default_speed but need to check wrong ways as 264929374
       path = LOW_SPEED,            --15mil TODO: make LOW_SPEED
@@ -893,7 +893,10 @@ function speed_handler(profile,way,result,data)
     result.forward_speed = profile.surface_speeds[surface]
     result.backward_speed = profile.surface_speeds[surface]
   elseif isBridgePassable(data) then
-    if (data.highway == "footway" and data.bicycle == "designated") then
+    if not data.highway or data.highway == '' then
+      result.forward_speed = 0
+      result.backward_speed = 0
+    elseif (data.highway == "footway" and data.bicycle == "designated") then
       result.forward_speed = 16
       result.backward_speed = 16
     elseif (data.highway == "footway") then
