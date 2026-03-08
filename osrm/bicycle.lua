@@ -750,6 +750,7 @@ function handle_bicycle_tags(profile,way,result,data)
   data.duration = way:get_value_by_key("duration")
   data.service = way:get_value_by_key("service")
   data.tracktype = way:get_value_by_key("tracktype")
+  data.mtb_scale = way:get_value_by_key("mtb:scale")
   data.foot = way:get_value_by_key("foot")
   data.foot_forward = way:get_value_by_key("foot:forward")
   data.foot_backward = way:get_value_by_key("foot:backward")
@@ -826,7 +827,13 @@ function speed_handler(profile,way,result,data)
   local speed = profile.bicycle_speeds[data.highway] or 0
   if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
       if surface and is_road_surface(surface) then
-        speed = profile.surface_speeds[surface]
+        -- https://www.openstreetmap.org/way/153756722 (concrete:lanes but grade2 - take the worse)
+        -- grade1 with good surface is fine, use surface speed directly
+        if tracktype == "grade1" then
+          speed = profile.surface_speeds[surface]
+        else
+          speed = math.min(profile.surface_speeds[surface], profile.tracktype_speeds[tracktype])
+        end
       else
         speed = profile.tracktype_speeds[tracktype]
       end
@@ -837,6 +844,10 @@ function speed_handler(profile,way,result,data)
   -- it always decrease cycleway speeds
   if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
     speed = profile.surface_speeds[surface]
+  end
+  if data.mtb_scale and tonumber(data.mtb_scale) and tonumber(data.mtb_scale) >= 0 then
+    --  https://www.openstreetmap.org/way/87329570 paved but mtb_scace=1 - be pessimistic
+    speed = 0
   end
 
   if data.highway == "primary" or data.highway == "trunk" then
