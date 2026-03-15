@@ -361,7 +361,7 @@ function setup()
       wood = LOW_SPEED,
       metal = LOW_SPEED,
       ["cobblestone:flattened"] = LOW_SPEED,
-      paving_stones = 5,
+      paving_stones = 10,
       ["paving_stones:lanes"] = LOW_SPEED,
       compacted = LOW_SPEED,
       cobblestone = LOW_SPEED,
@@ -1153,7 +1153,7 @@ function bike_push_handler(profile,way,result,data)
           push_backward_speed = profile.walking_speed
         elseif data.way_type_allows_pushing then
           push_forward_speed = profile.walking_speed
-          if not data.implied_oneway then
+          if not data.implied_oneway and not (data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" or data.oneway == "-1") then
             push_backward_speed = profile.walking_speed
           end
         end
