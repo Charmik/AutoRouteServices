@@ -1012,7 +1012,7 @@ function speed_handler(profile,way,result,data)
     end
   end
 
-  if not isRoadBicycleAllowed(profile, data) and result.forward_speed > 0 and (lanes >= 3 or (lanes >= 2 and data.oneway == "yes" and data.maxspeed >= 80 and (data.highway == "primary" or data.highway == "trunk"))) then
+  if not isRoadBicycleAllowed(profile, data) and result.forward_speed > 0 and (lanes >= 2 and data.oneway == "yes" and data.maxspeed >= 80 and (data.highway == "primary" or data.highway == "trunk")) then
     result.forward_speed = result.forward_speed / 10
     result.backward_speed = result.backward_speed / 10
   end
