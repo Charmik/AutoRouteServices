@@ -14,7 +14,7 @@ Arguments:
 This script:
 1. Downloads OSM PBF files for specified countries to [directory]
 2. Analyzes surface statistics for original files
-3. Runs modify_osm_ways.py to add surface tags (if heygit_ids.txt exists)
+3. Runs com.autoroute.osm.ModifyOsmWays Java app to add surface tags (if heygit_ids.txt exists)
 4. Analyzes surface statistics for modified files
 5. Generates surface_stats.csv in [directory]
 
@@ -395,7 +395,7 @@ def download_country(country_name, url, data_dir, skip_download=False):
 
 
 def run_modify_osm_ways(pbf_file, ids_file, skip_modify=False):
-    """Run modify_osm_ways.py on the PBF file"""
+    """Run com.autoroute.osm.ModifyOsmWays Java app on the PBF file"""
     if skip_modify:
         print(f"  ⊘ Skipping modification (--skip-modify enabled)")
         return None
@@ -415,11 +415,21 @@ def run_modify_osm_ways(pbf_file, ids_file, skip_modify=False):
         print(f"  ✓ Already modified: {output_file}")
         return output_file
 
-    print(f"  Running modify_osm_ways.py...")
+    # AutoRoute project path
+    autoroute_path = os.path.expanduser('~/disk/AutoRoute')
+    if not os.path.exists(autoroute_path):
+        print(f"  ✗ AutoRoute project not found at: {autoroute_path}")
+        return None
+
+    print(f"  Running com.autoroute.osm.ModifyOsmWays...")
 
     try:
         result = subprocess.run(
-            ['python3', './modify_osm_ways.py', pbf_file, ids_file],
+            f'cd {autoroute_path} && mvn compile -q && '
+            f'MAVEN_OPTS="-XX:+UseParallelGC" mvn exec:java -q '
+            f'-Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" '
+            f'-Dexec.args="{pbf_file} {ids_file}"',
+            shell=True,
             check=True,
             capture_output=False
         )
@@ -435,7 +445,7 @@ def run_modify_osm_ways(pbf_file, ids_file, skip_modify=False):
         print(f"  ✗ Modification failed: {e}")
         return None
     except Exception as e:
-        print(f"  ✗ Error running modify_osm_ways.py: {e}")
+        print(f"  ✗ Error running ModifyOsmWays: {e}")
         return None
 
 
@@ -717,9 +727,10 @@ Examples:
     print(f"  Skip modify: {args.skip_modify}")
     print()
 
-    # Check if modify_osm_ways.py exists
-    if not os.path.exists('./modify_osm_ways.py'):
-        print("Warning: modify_osm_ways.py not found in current directory")
+    # Check if AutoRoute project exists for modification step
+    autoroute_path = os.path.expanduser('~/disk/AutoRoute')
+    if not os.path.exists(autoroute_path):
+        print(f"Warning: AutoRoute project not found at {autoroute_path}")
         print("Modification step will be skipped")
         args.skip_modify = True
 
