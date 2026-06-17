@@ -17,8 +17,8 @@ cp "$OSRM_SOURCES/data/driving_side.geojson" .
 "$OSRM_SOURCES/build/osrm-extract" --location-dependent-data driving_side.geojson -p bicycle.lua merged.osm.pbf || echo "osrm-extract failed"
 "$OSRM_SOURCES/build/osrm-partition" merged.osrm || echo "osrm-partition failed"
 CUSTOMIZE_ARGS="--segment-speed-file traffic_final.csv"
-if [ -f traffic_final_turns.csv ]; then
-    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file traffic_final_turns.csv"
-fi
-#"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file traffic_final.csv || echo "osrm-customize failed"
-"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file traffic_final.csv --turn-penalty-file traffic_final_turns.csv || echo "osrm-customize failed"
+#if [ -f traffic_final_turns.csv ]; then
+#    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file traffic_final_turns.csv"
+#fi
+"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file traffic_final.csv || echo "osrm-customize failed"
+#"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file traffic_final.csv --turn-penalty-file traffic_final_turns.csv || echo "osrm-customize failed"

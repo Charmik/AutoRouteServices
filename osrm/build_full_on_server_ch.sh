@@ -15,10 +15,10 @@ telegram-send "Started osrm build $(hostname)"
 
 #sudo swapoff -a
 #rm -f swap
-sudo fallocate -l 850G swap # 256RAM + 440 is not enough for extract
-sudo chmod 600 swap
-sudo mkswap swap
-sudo swapon swap
+#sudo fallocate -l 850G swap # 256RAM + 440 is not enough for extract
+#sudo chmod 600 swap
+#sudo mkswap swap
+#sudo swapon swap
 #sudo swapon -p 32767 swap
 #sudo swapon -p 1 swap
 
@@ -117,9 +117,9 @@ rm -rf ~/disk/osrm_full_partition_$DATE
 cp -r ~/disk/osrm_full_$DATE ~/disk/osrm_full_partition_$DATE
 
 CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final.csv"
-if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
-    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
-fi
+#if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
+#    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
+#fi
 ~/disk/osrm-backend/build/osrm-customize -t $(nproc) planet-latest.osrm $CUSTOMIZE_ARGS || { echo "osrm-customize failed"; telegram-send "osrm-customize failed $(hostname)"; exit 1; }
 #~/disk/osrm-backend/build/osrm-customize -t $(nproc) planet-latest.osrm || { echo "osrm-customize failed"; telegram-send "osrm-customize failed $(hostname)"; exit 1; }
 telegram-send "Customize finished $(hostname)"

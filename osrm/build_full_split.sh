@@ -149,9 +149,9 @@ process_part() {
         ~/disk/osrm-backend/build/osrm-partition -t $(nproc) ${osrm_file} || { echo "osrm-partition part${part_num} failed"; telegram-send "osrm-partition part${part_num} failed $(hostname)"; exit 1; }
         #telegram-send "Part ${part_num} partition finished $(hostname)"
         CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final.csv"
-        if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
-            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
-        fi
+#        if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
+#            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
+#        fi
         ~/disk/osrm-backend/build/osrm-customize -t $(nproc) ${osrm_file} $CUSTOMIZE_ARGS || { echo "osrm-customize part${part_num} failed"; telegram-send "osrm-customize part${part_num} failed $(hostname)"; exit 1; }
     else
         ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file ~/disk/traffic_dumps/traffic_final.csv || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }

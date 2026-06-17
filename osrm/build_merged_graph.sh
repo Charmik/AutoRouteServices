@@ -57,8 +57,12 @@ if [ "$1" == "full" ]; then
     echo "Running full download and merge..."
     download_with_retry https://download.geofabrik.de/europe/cyprus-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/russia/northwestern-fed-district-latest.osm.pbf
-    download_with_retry https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf
+    #UK parts
+    download_with_retry https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf
+    download_with_retry https://download.geofabrik.de/europe/united-kingdom/scotland-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/europe/austria-latest.osm.pbf
+    download_with_retry https://download.geofabrik.de/europe/estonia-latest.osm.pbf
+    download_with_retry https://download.geofabrik.de/europe/serbia-latest.osm.pbf
 
     #Spain
     download_with_retry https://download.geofabrik.de/europe/spain/cataluna-latest.osm.pbf
@@ -70,10 +74,11 @@ if [ "$1" == "full" ]; then
     download_with_retry https://download.geofabrik.de/europe/germany/thueringen-latest.osm.pbf #Leipzig3
     download_with_retry https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf
+    #Czech
+#    download_with_retry https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf
     ##North Americas
-    download_with_retry https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf
-    download_with_retry https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf
-    download_with_retry https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf
+#    download_with_retry https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf
+#    download_with_retry https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf
 
     # Check if we have any files to merge
     if [ ${#DOWNLOADED_FILES[@]} -eq 0 ]; then
@@ -115,9 +120,9 @@ cp ~/disk/osrm-backend/data/driving_side.geojson .
 ~/disk/osrm-backend/build/osrm-partition merged.osrm || echo "osrm-partition failed"
 
 CUSTOMIZE_ARGS="--segment-speed-file $HOME/disk/traffic_dumps/traffic_final.csv"
-if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
-    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
-fi
+#if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
+#    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
+#fi
 ~/disk/osrm-backend/build/osrm-customize merged.osrm $CUSTOMIZE_ARGS || echo "osrm-customize failed"
 
 rm *.pbf

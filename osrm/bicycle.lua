@@ -11,7 +11,8 @@ find_access_tag = require("lib/access").find_access_tag
 limit = require("lib/maxspeed").limit
 Measure = require("lib/measure")
 
-LOW_SPEED = 0.5
+VERY_LOW_SPEED = 0.5
+LOW_SPEED = 3
 
 function is_road_surface(surface)
   if not surface then
@@ -41,6 +42,19 @@ function is_road_surface(surface)
   end
   
   return false
+end
+
+-- Whether a turn leg's speed counts as a full-speed ("fast") road.
+--
+-- In process_turn, turn.source_speed/target_speed is NOT the speed the profile
+-- assigned. OSRM reconstructs it from the stored edge as
+-- int(36 * distance_meters / duration_deciseconds) (see ExtractionTurnLeg in
+-- osrm-backend/include/extractor/extraction_turn.hpp). Both the stored duration
+-- (integer deciseconds) and the final int() truncation are lossy, so a road set
+-- to default_speed (25) reads back as 24 here. Comparing with == default_speed
+-- would therefore reject ordinary full-speed roads, so we allow a 10% tolerance.
+function is_fast_road(speed, profile)
+  return speed >= profile.default_speed * 0.9
 end
 
 function isBridgePassable(data)
@@ -256,6 +270,18 @@ function setup()
       'opposite_share_busway'
     },
 
+    -- Cycleway tag values that mark a road as "bike-friendly with cars":
+    -- dedicated lane, track, or shared bus lane on a regular road.
+    -- Excludes shared_lane (just paint), separate (different way), and situational tags.
+    turn_friendly_cycleway_tags = Set {
+      'lane',
+      'track',
+      'share_busway',
+      'opposite_lane',
+      'opposite_track',
+      'opposite_share_busway',
+    },
+
     cycleway_relation_types = Set {
       'route',
       'network'
@@ -319,7 +345,9 @@ function setup()
     pedestrian_speeds = {
       footway = walking_speed,
       pedestrian = walking_speed,
-      steps = walking_speed -- https://www.openstreetmap.org/way/25838958
+      -- steps (stairs) must stay near-impassable for a road bike: keep 0.5 km/h, NOT LOW_SPEED(3),
+      -- otherwise the lowered turn penalty lets routes shortcut over stairs (e.g. UK Putney 3759m).
+      steps = VERY_LOW_SPEED -- https://www.openstreetmap.org/way/25838958
     },
 
     railway_speeds = {
@@ -391,7 +419,7 @@ function setup()
     },
 
     tracktype_speeds = {
-      grade1 = 0,   -- Default speed for grade1
+      grade1 = default_speed,   -- Default speed for grade1
       grade2 = 0,   -- Speed 0 for grade2 (avoid)
       grade3 = 0,   -- Speed 0 for grade3 (avoid)
       grade4 = 0,   -- Speed 0 for grade4 (avoid)
@@ -746,7 +774,12 @@ function handle_bicycle_tags(profile,way,result,data)
   data.cycleway = way:get_value_by_key("cycleway")
   data.cycleway_left = way:get_value_by_key("cycleway:left")
   data.cycleway_right = way:get_value_by_key("cycleway:right")
+  data.cycleway_both = way:get_value_by_key("cycleway:both")
   data.cycleway_surface = way:get_value_by_key("cycleway:surface")
+  data.busway = way:get_value_by_key("busway")
+  data.busway_left = way:get_value_by_key("busway:left")
+  data.busway_right = way:get_value_by_key("busway:right")
+  data.busway_both = way:get_value_by_key("busway:both")
   data.duration = way:get_value_by_key("duration")
   data.service = way:get_value_by_key("service")
   data.tracktype = way:get_value_by_key("tracktype")
@@ -826,14 +859,22 @@ function speed_handler(profile,way,result,data)
 
   local speed = profile.bicycle_speeds[data.highway] or 0
   if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
-      if surface and is_road_surface(surface) then
-        -- https://www.openstreetmap.org/way/153756722 (concrete:lanes but grade2 - take the worse)
+      local good_surface = surface ~= nil and is_road_surface(surface)
+      local good_smoothness = data.smoothness == "excellent" or data.smoothness == "good"
+      if good_surface then
         -- grade1 with good surface is fine, use surface speed directly
         if tracktype == "grade1" then
           speed = profile.surface_speeds[surface]
+        elseif data.highway ~= "track" or good_smoothness then
+          -- https://www.openstreetmap.org/way/489589483 (asphalt cycleway mistagged grade3 - tracktype only penalizes real tracks)
+          -- https://www.openstreetmap.org/way/222035412 (asphalt cycleway with smoothness=excellent - trust explicit smoothness)
+          speed = profile.surface_speeds[surface]
         else
+          -- https://www.openstreetmap.org/way/153756722 (concrete:lanes but grade2 - take the worse)
           speed = math.min(profile.surface_speeds[surface], profile.tracktype_speeds[tracktype])
         end
+      elseif data.highway ~= "track" and good_smoothness then
+        -- no surface tag but explicit good smoothness on a non-track way - keep the highway speed
       else
         speed = profile.tracktype_speeds[tracktype]
       end
@@ -1176,8 +1217,8 @@ function bike_push_handler(profile,way,result,data)
   if data.bicycle == "dismount" then
     result.forward_mode = mode.pushing_bike
     result.backward_mode = mode.pushing_bike
-    result.forward_speed = profile.walking_speed
-    result.backward_speed = profile.walking_speed
+    result.forward_speed = VERY_LOW_SPEED
+    result.backward_speed = VERY_LOW_SPEED
   end
 end
 
@@ -1319,6 +1360,11 @@ function process_way(profile, way, result, relations)
     cycleway = nil,
     cycleway_left = nil,
     cycleway_right = nil,
+    cycleway_both = nil,
+    busway = nil,
+    busway_left = nil,
+    busway_right = nil,
+    busway_both = nil,
     duration = nil,
     service = nil,
     foot = nil,
@@ -1409,6 +1455,37 @@ function process_way(profile, way, result, relations)
       end
     end
   end
+
+  if data.highway == "cycleway" then
+    result.highway_turn_classification = 1
+  elseif data.junction == "roundabout" or data.junction == "circular" then
+    -- Tier 4: roundabout ring segment. Circulating the ring produces a chain of
+    -- slight "turns" at every arm node that can sum to 100s+ for a 60m ring
+    -- (Tartu Teemandi roundabout), so process_turn caps ring->ring turns.
+    result.highway_turn_classification = 4
+  else
+    -- Tier 2: regular road with bike-specific infrastructure.
+    -- Turning ONTO such a road is cheaper than a generic 3-lane road,
+    -- but still more expensive than turning onto a dedicated cycleway.
+    local friendly = profile.turn_friendly_cycleway_tags
+    local has_cycleway_infra =
+      (data.cycleway and friendly[data.cycleway]) or
+      (data.cycleway_left and friendly[data.cycleway_left]) or
+      (data.cycleway_right and friendly[data.cycleway_right]) or
+      (data.cycleway_both and friendly[data.cycleway_both])
+    local has_busway_lane =
+      data.busway == "lane" or data.busway_left == "lane" or
+      data.busway_right == "lane" or data.busway_both == "lane"
+    if has_cycleway_infra or has_busway_lane then
+      result.highway_turn_classification = 2
+    else
+      local maxspeed = data.maxspeed or 0
+      local is_calm = (maxspeed > 0 and maxspeed <= 40)
+      if is_calm then
+        result.highway_turn_classification = 3
+      end
+    end
+  end
 end
 
 
@@ -1441,13 +1518,21 @@ function process_turn(profile, turn)
     local angle_factor = angle_abs / 180.0  -- Normalize to 0-1
 
     -- TODO: make 180 & uncomment limit with MAX_TURN_PENALTY
-    local base_penalty = 120 * angle_factor * (1 + angle_factor)
+    -- Coefficient lowered 120 -> 40: the old value produced ~72-117s for a single
+    -- junction turn, so in dense intersection areas (Tartu Põvvatu/Luunja, Limassol
+    -- Fragklinou Rousvelt) a 2-3 turn direct route could cost 300-700s in turns alone
+    -- and lose to a longer turn-avoiding detour. 40 gives realistic cycling turn costs
+    -- (~10-40s) while preserving the angle/cross-traffic/lane structure below.
+    local base_penalty = 70 * angle_factor * (1 + angle_factor)
 
     -- Adjust turn bias based on driving side
     -- In left-hand driving (UK, Cyprus, etc.): right turns cross traffic (more expensive)
     -- In right-hand driving: left turns cross traffic (more expensive)
     local is_left_hand_driving = turn.is_left_hand_driving
     local source_number_of_lanes = turn.source_number_of_lanes or 1
+    if (source_number_of_lanes == 0) then
+      source_number_of_lanes = 1
+    end
     if (source_number_of_lanes > 5) then
       source_number_of_lanes = 5
     end
@@ -1456,9 +1541,9 @@ function process_turn(profile, turn)
     if turn.angle >= 0.0 then
       -- Right turn
 --       print("Turn1: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
-      if is_left_hand_driving and source_number_of_lanes > 1 then
+      if is_left_hand_driving then
         -- Right turns cross traffic in left-hand driving countries (UK, Cyprus, etc.)
-        turn.duration = base_penalty * profile.turn_bias * 2 * source_number_of_lanes
+        turn.duration = base_penalty * profile.turn_bias * 1.5 * source_number_of_lanes
       else
         -- Right turns are easier in right-hand driving countries
         turn.duration = base_penalty / profile.turn_bias
@@ -1466,9 +1551,9 @@ function process_turn(profile, turn)
     else
       -- Left turn
 --       print("Turn2: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
-      if not is_left_hand_driving and source_number_of_lanes > 1 then
+      if not is_left_hand_driving then
         -- Left turns cross traffic in right-hand driving countries
-        turn.duration = base_penalty * profile.turn_bias * 2 * source_number_of_lanes
+        turn.duration = base_penalty * profile.turn_bias * 1.5 * source_number_of_lanes
       else
         -- Left turns are easier in left-hand driving countries
         turn.duration = base_penalty / profile.turn_bias
@@ -1486,12 +1571,48 @@ function process_turn(profile, turn)
 
   local source_is_highway = (turn.source_mode == mode.highway_cycling)
   local target_is_highway = (turn.target_mode == mode.highway_cycling)
-  if not source_is_highway and target_is_highway then
-    turn.duration = turn.duration + 600
-  elseif source_is_highway and not target_is_highway then
+  -- A *_link ramp is the designated entrance/exit of a trunk/primary - entering the highway
+  -- there is the normal transition and must not be punished, otherwise OSRM detours kilometers
+  -- to a junction where a fast cycleway caps the penalty (Tartu: Teemandi trunk_link -> Lääneringtee).
+  local via_link_ramp = turn.source_is_link or turn.target_is_link
+  if (source_is_highway ~= target_is_highway) and not via_link_ramp then
     turn.duration = turn.duration + 600
   end
   turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
+
+  --"cycleway"
+  local source_is_fast_cycleway = is_fast_road(turn.source_speed, profile)
+  local target_is_fast_cycleway = is_fast_road(turn.target_speed, profile)
+  if (source_is_fast_cycleway or target_is_fast_cycleway) then
+    if turn.source_highway_turn_classification == 1 or turn.target_highway_turn_classification == 1 then
+      --turn.duration = math.min(turn.duration, 29)
+      turn.duration = 0
+      --turn_friendly_cycleway_tags
+    elseif turn.source_highway_turn_classification == 2 or turn.target_highway_turn_classification == 2 then
+      turn.duration = math.min(turn.duration, 39)
+      --low speed
+    elseif turn.source_highway_turn_classification == 3 or turn.target_highway_turn_classification == 3
+        or turn.source_highway_turn_classification == 4 or turn.target_highway_turn_classification == 4 then
+      turn.duration = math.min(turn.duration, 49)
+    else
+      -- Any other turn between fast roads (e.g. a sharp right turn from a
+      -- residential street onto a 2-lane primary like Leoforos Amathountos).
+      -- Such a turn can accumulate a very large penalty (right-turn cross-traffic
+      -- x lanes + the +600 highway mode-change), exceeding the ~1000 cost of a
+      -- 500m out-and-back "lollipop" (U-turn on the dual carriageway), so OSRM
+      -- prefers the detour. We keep the turn expensive (it IS a bad turn) but cap
+      -- it below the detour cost so a single direct turn is never worse than a
+      -- 500m loop. Normal turns (< cap) are unaffected.
+      turn.duration = math.min(turn.duration, 600) -- increase more?
+    end
+  end
+
+  -- Circulating inside a roundabout ring is continuous riding, not discrete turns
+  -- (Tartu Teemandi: 3-4 slight-left ring "turns" summed to ~90s for a 60m ring,
+  -- making OSRM overshoot 1.1km past the destination instead of using the ring).
+  if turn.source_highway_turn_classification == 4 and turn.target_highway_turn_classification == 4 then
+    turn.duration = math.min(turn.duration, 5)
+  end
 
 --   if profile.properties.weight_name == 'cyclability' then
 --     turn.weight = turn.duration
