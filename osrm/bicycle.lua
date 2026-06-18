@@ -1575,8 +1575,17 @@ function process_turn(profile, turn)
   -- there is the normal transition and must not be punished, otherwise OSRM detours kilometers
   -- to a junction where a fast cycleway caps the penalty (Tartu: Teemandi trunk_link -> Lääneringtee).
   local via_link_ramp = turn.source_is_link or turn.target_is_link
+  -- HIGHWAY_MODE_CHANGE_PENALTY: cost of getting on/off a primary/trunk (highway_cycling
+  -- mode). Kept as high as possible to discourage needless hopping on/off main roads, but it
+  -- must stay low enough that a genuinely quieter parallel corridor (which has to leave the
+  -- primary and rejoin, paying this twice) can still win over staying on the high-traffic primary.
+  -- Limassol case (start 34.9094,33.0581 -> 34.9149,33.0726): the quiet corridor costs ~533 +
+  -- 2*PENALTY (two mode changes) and the high-traffic primary costs a fixed 632. So the quiet
+  -- route wins only while 533 + 2*PENALTY < 632, i.e. PENALTY <= 49. Empirically 49 -> quiet
+  -- route (weight 631); 50 -> primary route (632). Margin is ~1s, so this is the literal maximum.
+  local HIGHWAY_MODE_CHANGE_PENALTY = 49
   if (source_is_highway ~= target_is_highway) and not via_link_ramp then
-    turn.duration = turn.duration + 600
+    turn.duration = turn.duration + HIGHWAY_MODE_CHANGE_PENALTY
   end
   turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
 
