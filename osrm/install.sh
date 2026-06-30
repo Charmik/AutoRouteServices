@@ -5,7 +5,8 @@ mkdir -p ~/data
 mkdir -p ~/disk
 mkdir -p ~/.m2/repository/com/wolt
 
-sudo apt-get install -y python3.8-venv htop vim tmux pipx git build-essential git cmake pkg-config libbz2-dev libxml2-dev libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev maven
+#sudo apt-get install -y python3.8-venv htop vim tmux pipx git build-essential git cmake pkg-config libbz2-dev libxml2-dev libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev maven
+sudo apt-get install -y htop vim tmux pipx git build-essential git cmake pkg-config libbz2-dev libxml2-dev libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev maven osmium-tool
 wget https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
 sudo dpkg -i jdk-25_linux-x64_bin.deb
 
