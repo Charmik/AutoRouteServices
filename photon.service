@@ -11,7 +11,7 @@ Type=simple
 
 WorkingDirectory=/home/charm/data/photon
 Environment="JAVA_OPTIONS=-Xmx12G"
-ExecStart=java $JAVA_OPTIONS -jar target/photon-0.7.0.jar -cors-any -data-dir .
+ExecStart=java $JAVA_OPTIONS -jar target/photon-1.2.1.jar -cors-any -data-dir . -listen-ip 0.0.0.0
 ExecStop=/bin/kill -15 $MAINPID
 Restart=always
 RestartSec=3
