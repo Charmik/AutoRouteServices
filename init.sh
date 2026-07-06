@@ -55,19 +55,6 @@ sudo systemctl start docker
 sudo usermod -aG docker $USER
 sudo docker run hello-world
 
-# Valhalla
-#cd ~/disk
-#if [ ! -d "docker-valhalla" ]; then
-#  git clone https://github.com/gis-ops/docker-valhalla
-#fi
-#  cd docker-valhalla
-#  git pull
-#  cp ~/data/AutoRouteServices/valhalla/docker-compose.yml .
-#  cp ~/data/AutoRouteServices/valhalla/docker-compose-build.yml .
-#  ulimit -n 65536
-# docker compose -f docker-compose.yml up --build
-# docker compose -f docker-compose-build.yml up --build
-
 # OpenTopoData
 #cd ~/disk
 #if [ ! -d "opentopodata" ]; then
