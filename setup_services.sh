@@ -26,7 +26,7 @@ if [ ! -d "photon" ]; then
   git clone https://github.com/komoot/photon
   cd photon
   sudo apt-get install bzip2 pbzip2
-  wget -O - https://download1.graphhopper.com/public/photon-db-latest.tar.bz2 | pbzip2 -cd | tar x
+  wget -O - https://download1.graphhopper.com/public/photon-db-planet-1.0-latest.tar.bz2 | pbzip2 -cd | tar x
   ./gradlew app:es_embedded:build
 else
   cd photon
