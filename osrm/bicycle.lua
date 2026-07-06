@@ -337,7 +337,7 @@ function setup()
       road = default_speed, --43k
       unclassified = default_speed, --18mil
       service = LOW_SPEED,         --60 mil TODO: try with good surface
-      track = LOW_SPEED,        --28 mil TODO: can be default_speed but need to check wrong ways as 264929374
+      track = VERY_LOW_SPEED,   --28 mil
       path = LOW_SPEED,            --15mil TODO: make LOW_SPEED
       footway = LOW_SPEED          --27 mil TODO: make LOW_SPEED
     },
@@ -419,7 +419,7 @@ function setup()
     },
 
     tracktype_speeds = {
-      grade1 = default_speed,   -- Default speed for grade1
+      grade1 = default_speed / 2,   -- unsurfaced grade1 track: half speed (was default_speed)
       grade2 = 0,   -- Speed 0 for grade2 (avoid)
       grade3 = 0,   -- Speed 0 for grade3 (avoid)
       grade4 = 0,   -- Speed 0 for grade4 (avoid)
