@@ -34,6 +34,28 @@ if [ -n "$FULL_MODE" ] && [ "$FULL_MODE" != "full" ]; then
     exit 1
 fi
 
+# Verify a .pbf file exists and is at least the given size in GB
+# Usage: check_pbf_size <file> <min_gb>
+check_pbf_size() {
+    local file=$1
+    local min_gb=$2
+    if [ ! -f "$file" ]; then
+        echo "Error: $file does not exist"
+        telegram-send "pbf check failed: $file missing $(hostname)"
+        exit 1
+    fi
+    local size_bytes
+    size_bytes=$(stat -c%s "$file")
+    local min_bytes=$((min_gb * 1024 * 1024 * 1024))
+    if [ "$size_bytes" -lt "$min_bytes" ]; then
+        local size_gb=$((size_bytes / 1024 / 1024 / 1024))
+        echo "Error: $file is ${size_gb}GB, expected > ${min_gb}GB"
+        telegram-send "pbf check failed: $file is ${size_gb}GB, expected > ${min_gb}GB $(hostname)"
+        exit 1
+    fi
+    echo "OK: $file size check passed (> ${min_gb}GB)"
+}
+
 DO_PART1=false
 DO_PART2=false
 if [ "$PART" = "part1" ] || [ "$PART" = "both" ]; then
@@ -97,31 +119,35 @@ if [ "$FULL_MODE" = "full" ]; then
     cd ~/disk
 
     #mkdir ~/disk/traffic_dumps
-    #rsync -r --progress charm@88.99.161.250:/home/charm/disk/traffic_dumps/traffic_final.csv ~/disk/traffic_dumps/
+    #rsync -r --progress charm@88.99.161.250:/home/charm/disk/traffic_dumps/traffic_final_road.csv ~/disk/traffic_dumps/
 
     if [ "$DO_PART1" = true ]; then
         echo "Downloading Part 1 regions..."
-        wget -N https://download.geofabrik.de/europe-latest.osm.pbf
-        wget -N https://download.geofabrik.de/asia-latest.osm.pbf
-        wget -N https://download.geofabrik.de/africa-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/europe-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/asia-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/africa-latest.osm.pbf
 
         echo "Merging Part 1 regions..."
-        osmium merge europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf -o ~/disk/planet-part1.osm.pbf
+#        osmium merge --overwrite europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf -o ~/disk/planet-part1.osm.pbf || { echo "osmium merge part1 failed"; telegram-send "osmium merge part1 failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part1.osm.pbf 50
         cd ~/disk/AutoRoute
         MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part1.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part1 failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part1-modified.osm.pbf 70
     fi
 
     if [ "$DO_PART2" = true ]; then
         cd ~/disk
         echo "Downloading Part 2 regions..."
-        wget -N https://download.geofabrik.de/north-america-latest.osm.pbf
-        wget -N https://download.geofabrik.de/south-america-latest.osm.pbf
-        wget -N https://download.geofabrik.de/australia-oceania-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/north-america-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/south-america-latest.osm.pbf
+#        wget -N https://download.geofabrik.de/australia-oceania-latest.osm.pbf
 
         echo "Merging Part 2 regions..."
-        osmium merge north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf -o ~/disk/planet-part2.osm.pbf
+        osmium merge --overwrite north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf -o ~/disk/planet-part2.osm.pbf || { echo "osmium merge part2 failed"; telegram-send "osmium merge part2 failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part2.osm.pbf 20
         cd ~/disk/AutoRoute
         MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part2.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part2 failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part2-modified.osm.pbf 30
     fi
 else
     echo "Skipping download and osmium merge (not in full mode)"
@@ -148,13 +174,13 @@ process_part() {
     if [ "$ALGORITHM" = "mld" ]; then
         ~/disk/osrm-backend/build/osrm-partition -t $(nproc) ${osrm_file} || { echo "osrm-partition part${part_num} failed"; telegram-send "osrm-partition part${part_num} failed $(hostname)"; exit 1; }
         #telegram-send "Part ${part_num} partition finished $(hostname)"
-        CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final.csv"
+        CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final_road.csv"
 #        if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
 #            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
 #        fi
         ~/disk/osrm-backend/build/osrm-customize -t $(nproc) ${osrm_file} $CUSTOMIZE_ARGS || { echo "osrm-customize part${part_num} failed"; telegram-send "osrm-customize part${part_num} failed $(hostname)"; exit 1; }
     else
-        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file ~/disk/traffic_dumps/traffic_final.csv || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
+        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file ~/disk/traffic_dumps/traffic_final_road.csv || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
     fi
     rm *.osrm.ebg *.osrm.cnbg *.osrm.cnbg_to_ebg *.osrm.enw *.osrm.turn_penalties_index *.osrm.restrictions
     telegram-send "Part ${part_num} $ALGORITHM finished $(hostname)"

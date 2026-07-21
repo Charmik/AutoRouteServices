@@ -15,10 +15,11 @@ telegram-send "Started osrm build $(hostname)"
 
 #sudo swapoff -a
 #rm -f swap
-#sudo fallocate -l 850G swap # 256RAM + 440 is not enough for extract
+#sudo fallocate -l 750G swap # 256RAM + 440 is not enough for extract
 #sudo chmod 600 swap
 #sudo mkswap swap
 #sudo swapon swap
+#echo '/home/remote1/disk/swap none swap sw 0 0' | sudo tee -a /etc/fstab
 #sudo swapon -p 32767 swap
 #sudo swapon -p 1 swap
 
@@ -32,8 +33,8 @@ cd osrm_full_$DATE
 cp ~/data/AutoRouteServices/osrm/bicycle.lua .
 #rsync -r --progress charm@88.99.161.250:/home/charm/data/AutoRouteServices/osrm/bicycle.lua .
 
-#rsync -r --progress charm@88.99.161.250:/home/charm/disk/traffic_dumps/traffic_final.csv .
-#cp ~/data/traffic_dumps/traffic_final.csv .
+#rsync -r --progress charm@88.99.161.250:/home/charm/disk/traffic_dumps/traffic_final_road.csv .
+#cp ~/data/traffic_dumps/traffic_final_road.csv .
 
 cd ~/disk
 if [ ! -d "osrm-backend/build" ]; then
@@ -107,7 +108,7 @@ rm planet-latest.osm.pbf # rm after extract not to copy .pbf to other directorie
 #cp -r ~/disk/osrm_full_$DATE ~/disk/osrm_full_extracted_$DATE
 
 #telegram-send "Waiting to run sudo $(hostname)"
-#~/disk/osrm-backend/build/osrm-contract planet-latest.osrm --segment-speed-file ~/data/traffic_dumps/traffic_final.csv || echo "osrm-contract failed"
+#~/disk/osrm-backend/build/osrm-contract planet-latest.osrm --segment-speed-file ~/data/traffic_dumps/traffic_final_road.csv || echo "osrm-contract failed"
 #telegram-send "Contract finished $(hostname)"
 
 ~/disk/osrm-backend/build/osrm-partition -t $(nproc) --max-cell-sizes=1024,16384,262144,4194304 planet-latest.osrm || { echo "osrm-partition failed"; telegram-send "osrm-partition failed $(hostname)"; exit 1; }
@@ -116,7 +117,7 @@ telegram-send "Partition finished $(hostname)"
 rm -rf ~/disk/osrm_full_partition_$DATE
 cp -r ~/disk/osrm_full_$DATE ~/disk/osrm_full_partition_$DATE
 
-CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final.csv"
+CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final_road.csv"
 #if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
 #    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
 #fi

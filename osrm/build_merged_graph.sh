@@ -10,11 +10,38 @@ if ! command -v osmium &> /dev/null; then
 fi
 
 HOSTNAME=$(hostname)
-BUILD_DIR="osrm_merged"
+
+# Parse args: `full` triggers download+merge; `--profile road|gravel` selects the bike profile.
+# Both are optional and may appear in any order (default: non-full, road).
+PROFILE="road"
+MODE=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --profile) PROFILE="$2"; shift 2 ;;
+        full) MODE="full"; shift ;;
+        *) echo "Unknown argument: $1"; shift ;;
+    esac
+done
+
+# Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
+# gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.
+if [ "$PROFILE" = "gravel" ]; then
+    LUA_FILE="gravel.lua"
+    BUILD_DIR="osrm_merged_gravel"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
+    ROUTED_PORT=8006
+else
+    LUA_FILE="bicycle.lua"
+    BUILD_DIR="osrm_merged_road"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
+    ROUTED_PORT=8005
+fi
+echo "Building merged graph: profile=$PROFILE build_dir=$BUILD_DIR lua=$LUA_FILE port=$ROUTED_PORT"
+
 mkdir -p ~/disk/${BUILD_DIR}
 cd ~/disk/${BUILD_DIR}
 rm -rf ~/disk/${BUILD_DIR}/*
-cp ~/data/AutoRouteServices/osrm/bicycle.lua .
+cp ~/data/AutoRouteServices/osrm/${LUA_FILE} .
 
 # Track downloaded files
 DOWNLOADED_FILES=()
@@ -53,7 +80,7 @@ download_with_retry() {
     return 1
 }
 
-if [ "$1" == "full" ]; then
+if [ "$MODE" == "full" ]; then
     echo "Running full download and merge..."
     download_with_retry https://download.geofabrik.de/europe/cyprus-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/russia/northwestern-fed-district-latest.osm.pbf
@@ -113,13 +140,16 @@ else
 fi
 
 cp -r ~/disk/osrm-backend/profiles/lib/ .
+# bicycle.lua/gravel.lua are thin shims that require('lib/bike_common'); stock OSRM lib lacks it.
+cp ~/data/AutoRouteServices/osrm/lib/bike_common.lua lib/
 cp ~/disk/osrm-backend/data/driving_side.geojson .
 
 
-~/disk/osrm-backend/build/osrm-extract --location-dependent-data driving_side.geojson -p bicycle.lua merged.osm.pbf || echo "osrm-extract failed"
+~/disk/osrm-backend/build/osrm-extract --location-dependent-data driving_side.geojson -p ${LUA_FILE} merged.osm.pbf || echo "osrm-extract failed"
 ~/disk/osrm-backend/build/osrm-partition merged.osrm || echo "osrm-partition failed"
 
-CUSTOMIZE_ARGS="--segment-speed-file $HOME/disk/traffic_dumps/traffic_final.csv"
+if [ ! -f "$TRAFFIC_CSV" ]; then echo "ERROR: traffic CSV not found: $TRAFFIC_CSV"; exit 1; fi
+CUSTOMIZE_ARGS="--segment-speed-file $TRAFFIC_CSV"
 #if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
 #    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
 #fi
@@ -136,13 +166,13 @@ SECONDS=$((ELAPSED_TIME % 60))
 echo "==========================================="
 echo "Total script execution time: ${HOURS}h ${MINUTES}m ${SECONDS}s"
 echo "==========================================="
-telegram-send "merged graph is ready $(hostname)"
+telegram-send "merged $PROFILE graph is ready $(hostname)"
 
 rm -rf ~/disk/share/${BUILD_DIR}
 cp -r ~/disk/${BUILD_DIR} ~/disk/share/${BUILD_DIR}
 cd ~/disk/share/${BUILD_DIR}
 
 #~/disk/osrm-backend/build/osrm-routed --algorithm ch --mmap on merged.osrm -p 8005
-~/disk/osrm-backend/build/osrm-routed --algorithm mld --mmap on merged.osrm -p 8005
+#~/disk/osrm-backend/build/osrm-routed --algorithm mld --mmap on merged.osrm -p ${ROUTED_PORT}
 
 echo 123

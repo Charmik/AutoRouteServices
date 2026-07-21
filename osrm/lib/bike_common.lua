@@ -1,0 +1,1693 @@
+-- Shared bicycle profile logic.
+--
+-- This module holds ALL the logic that used to live in bicycle.lua. A concrete
+-- profile (road, gravel, ...) is produced by calling BikeCommon.make_profile(cfg),
+-- passing a config table whose values are the only thing that differs between
+-- profiles (speeds, surface tables, the allowed-surface gate, etc.).
+--
+-- The require block below intentionally assigns to GLOBALS (not locals), exactly
+-- as the original bicycle.lua did: lib/way_handlers.lua, lib/measure.lua and
+-- lib/relations.lua reference the global `Set` at load time, and lib/way_handlers
+-- exposes the global `WayHandlers`. Keeping these global (and in this order, with
+-- Set first) preserves the original load-time environment.
+
+Set = require('lib/set')
+Sequence = require('lib/sequence')
+Handlers = require("lib/way_handlers")
+Relations = require("lib/relations")
+TrafficSignal = require("lib/traffic_signal")
+find_access_tag = require("lib/access").find_access_tag
+limit = require("lib/maxspeed").limit
+Measure = require("lib/measure")
+
+local BikeCommon = {}
+
+function BikeCommon.make_profile(cfg)
+  local VERY_LOW_SPEED = cfg.very_low_speed
+  local LOW_SPEED = cfg.low_speed
+  local default_speed = cfg.default_speed
+
+  -- Surface gate. The ONLY road-vs-gravel divergence introduced by this refactor:
+  -- the original inline `is_road_surface` is replaced by the profile-supplied
+  -- `cfg.is_allowed_surface`. For the road profile cfg.is_allowed_surface has the
+  -- exact original body, so behavior is unchanged.
+  local function is_road_surface(surface)
+    return cfg.is_allowed_surface(surface)
+  end
+
+  -- Paved / firm surface family (asphalt-grade). Used to gate the bicycle=designated footway/path speed
+  -- boost on the gravel profile ("not unpaved" = a paved or untagged surface).
+  local paved_surfaces = Set {
+    'asphalt', 'paved', 'concrete', 'concrete:plates', 'concrete:lanes', 'tarmac', 'sealed', 'paving_stones'
+  }
+
+  -- Whether a cycle way/path (bicycle=designated footway/path, or a cycleway/designated lane) qualifies
+  -- for the cycleway-like speed boost. The surface gate is the only per-profile difference, kept here so
+  -- the boost branches themselves stay shared (not copied):
+  --   road   -> boost genuinely PAVED paths (is_road_surface) — road bikes prefer smooth cycle infra.
+  --   gravel -> boost UNPAVED paths — gravel bikes prefer dedicated unpaved cycle infra; a paved cycle
+  --             path stays a plain connector (no boost).
+  local function boost_cycle_surface(surface)
+    if cfg.profile == "gravel" then
+      return surface ~= nil and not paved_surfaces[surface]
+    end
+    return is_road_surface(surface)
+  end
+
+  -- Whether a turn leg's speed counts as a full-speed ("fast") road.
+  --
+  -- In process_turn, turn.source_speed/target_speed is NOT the speed the profile
+  -- assigned. OSRM reconstructs it from the stored edge as
+  -- int(36 * distance_meters / duration_deciseconds) (see ExtractionTurnLeg in
+  -- osrm-backend/include/extractor/extraction_turn.hpp). Both the stored duration
+  -- (integer deciseconds) and the final int() truncation are lossy, so a road set
+  -- to default_speed (25) reads back as 24 here. Comparing with == default_speed
+  -- would therefore reject ordinary full-speed roads, so we allow a 10% tolerance.
+  local function is_fast_road(speed, profile)
+    return speed >= profile.default_speed * 0.9
+  end
+
+  local function isBridgePassable(data)
+    if not data.bridge then
+      return false
+    end
+
+    if data["disused:bridge"] == "yes" or data["abandoned:bridge"] == "yes" then
+      return false
+    end
+
+    if data.construction or data["bridge:construction"] then
+      return false
+    end
+
+    if data.access == "no" or data.access == "private" then
+      return false
+    end
+
+    if data.bicycle == "no" or data.bicycle == "dismount" then
+      return false
+    end
+
+    if data.bridge == "low_water_crossing" then
+      return true
+    end
+
+    if data.bridge == "movable" then
+      return true
+    end
+
+    return data.bridge == "yes" or data.bridge == "aqueduct" or data.bridge == "boardwalk" or
+           data.bridge == "cantilever" or data.bridge == "covered" or data.bridge == "trestle" or
+           data.bridge == "viaduct"
+  end
+
+  local function isRoadBicycleAllowed(profile, data)
+    local bicycle = data.bicycle
+    local bicycle_road = data.bicycle_road
+    local cyclestreet = data.cyclestreet
+    local cycleway = data.cycleway
+    local cycleway_left = data.cycleway_left
+    local cycleway_right = data.cycleway_right
+
+    local allowed_bicycle_tags = {
+      "yes",
+      "designated",
+      "lane",
+      "track",
+      "shared_lane",
+      "share_busway",
+      "shoulder",
+      "separate",
+      "opposite"
+    }
+
+    if bicycle then
+      for _, tag in ipairs(allowed_bicycle_tags) do
+        if bicycle == tag then
+          return true
+        end
+      end
+    end
+
+    if bicycle_road == "yes" then
+      return true
+    end
+
+    if cyclestreet == "yes" then
+      return true
+    end
+
+    if cycleway and profile.cycleway_tags[cycleway] then
+      return true
+    end
+
+    if cycleway_left and profile.cycleway_tags[cycleway_left] then
+      return true
+    end
+
+    if cycleway_right and profile.cycleway_tags[cycleway_right] then
+      return true
+    end
+
+    return false
+  end
+
+  local function setup()
+    local default_speed = cfg.default_speed
+    local walking_speed = LOW_SPEED
+
+    mode = {
+        inaccessible = 0,
+        cycling = 1,
+        pushing_bike = 2,
+        ferry = 3,
+        train = 4,
+        highway_cycling = 5,
+      }
+
+    return {
+      properties = {
+        u_turn_penalty                = 1000,
+        traffic_light_penalty         = 10,
+  --       traffic_light_penalty         = 30,
+        --weight_name                   = 'cyclability',
+        weight_name                   = 'duration',
+        process_call_tagless_node     = false,
+        max_speed_for_map_matching    = 110/3.6, -- kmph -> m/s
+        use_turn_restrictions         = false,
+        continue_straight_at_waypoint = false,
+        mode_change_penalty           = 30,
+        use_relations                 = true,
+        left_hand_driving             = false, -- default for most countries
+      },
+
+      default_mode              = mode.cycling,
+      default_speed             = default_speed,
+      walking_speed             = walking_speed,
+      oneway_handling           = true,
+      turn_penalty              = 100,
+      --turn_bias                 = 2.0, -- right turns are more cheaper than left turns
+      turn_bias                 = 1.0,
+      use_public_transport      = false,
+
+      -- Exclude narrow ways, in particular to route with cargo bike
+      width                     = nil, -- Cargo bike could 0.5 width, in meters
+      exclude_cargo_bike        = false,
+
+      allowed_start_modes = Set {
+        mode.cycling,
+        mode.pushing_bike,
+        mode.highway_cycling
+      },
+
+      barrier_blacklist = Set {
+        'yes',
+        'wall',
+        'fence'
+      },
+
+      access_tag_whitelist = Set {
+        'yes',
+        'permissive',
+        'designated'
+      },
+
+      access_tag_blacklist = Set {
+        'no',
+        'private',
+        'agricultural',
+        'forestry',
+        'delivery',
+        -- When a way is tagged with `use_sidepath` a parallel way suitable for
+        -- cyclists is mapped and must be used instead (by law). This tag is
+        -- used on ways that normally may be used by cyclists, but not when
+        -- a signposted parallel cycleway is available. For purposes of routing
+        -- cyclists, this value should be treated as 'no access for bicycles'.
+        'use_sidepath',
+        'hiking',
+        'trail',
+        'foot',
+        'pedestrian'
+      },
+
+      restricted_access_tag_list = Set { },
+
+      restricted_highway_whitelist = Set { },
+
+      -- tags disallow access to in combination with highway=service
+      service_access_tag_blacklist = Set { },
+
+      construction_whitelist = Set {
+        'no',
+        'widening',
+        'minor',
+      },
+
+      access_tags_hierarchy = Sequence {
+        'bicycle',
+        'vehicle',
+        'access'
+      },
+
+      restrictions = Set {
+        'bicycle'
+      },
+
+      cycleway_tags = Set {
+        'lane',
+        'shared_lane',
+        'share_busway',
+        'track',
+        'separate',
+        'crossing',
+        'shoulder',
+        'link',
+        'traffic_island',
+        'asl',
+        'opposite',
+        'opposite_lane',
+        'opposite_share_busway',
+        'opposite_track',
+        'shared',
+        'exclusive',
+        'advisory',
+      },
+
+      opposite_cycleway_tags = Set {
+        'opposite',
+        'opposite_lane',
+        'opposite_track',
+        'opposite_share_busway'
+      },
+
+      -- Cycleway tag values that mark a road as "bike-friendly with cars":
+      -- dedicated lane, track, or shared bus lane on a regular road.
+      -- Excludes shared_lane (just paint), separate (different way), and situational tags.
+      turn_friendly_cycleway_tags = Set {
+        'lane',
+        'track',
+        'share_busway',
+        'opposite_lane',
+        'opposite_track',
+        'opposite_share_busway',
+      },
+
+      cycleway_relation_types = Set {
+        'route',
+        'network'
+      },
+
+      cycleway_route_types = Set {
+        'bicycle',
+        'bike'
+      },
+
+      cycleway_network_types = Set {
+        'lcn',  -- local cycling network
+        'rcn',  -- regional cycling network
+        'ncn',  -- national cycling network
+        'icn'   -- international cycling network
+      },
+
+      relation_types = Sequence {
+        "route",        -- Individual cycling routes
+        "route_master", -- Groups of related cycling routes
+        "network"       -- Bicycle networks
+      },
+
+      -- reduce the driving speed by 30% for unsafe roads
+      -- only used for cyclability metric
+      unsafe_highway_list = {
+        primary = 0.5,
+        trunk = 0.5,
+        secondary = 0.65,
+        tertiary = 0.8,
+        primary_link = 0.5,
+        secondary_link = 0.65,
+        tertiary_link = 0.8,
+      },
+
+      service_penalties = {
+        alley             = 0.5,
+      },
+
+      bicycle_speeds = cfg.bicycle_speeds,
+
+      pedestrian_speeds = {
+        footway = walking_speed,
+        pedestrian = walking_speed,
+        -- steps (stairs) must stay near-impassable for a road bike: keep 0.5 km/h, NOT LOW_SPEED(3),
+        -- otherwise the lowered turn penalty lets routes shortcut over stairs (e.g. UK Putney 3759m).
+        steps = VERY_LOW_SPEED -- https://www.openstreetmap.org/way/25838958
+      },
+
+      railway_speeds = {
+        train = 0,
+        railway = 0,
+        subway = 0,
+        light_rail = 0,
+        monorail = 0,
+        tram = 0
+      },
+
+      platform_speeds = {
+        platform = 0;
+      },
+
+      amenity_speeds = {
+        parking = 10,
+        parking_entrance = 10
+      },
+
+      man_made_speeds = {
+        pier = walking_speed
+      },
+
+      route_speeds = {
+        ferry = 0
+      },
+
+      surface_speeds = cfg.surface_speeds,
+
+      classes = Sequence {
+          'ferry', 'tunnel'
+      },
+
+      -- Which classes should be excludable
+      -- This increases memory usage so its disabled by default.
+      excludable = Sequence {
+  --        Set {'ferry'}
+      },
+
+      tracktype_speeds = cfg.tracktype_speeds,
+
+      smoothness_speeds = cfg.smoothness_speeds,
+
+      avoid = cfg.avoid
+    }
+  end
+
+  local function process_node(profile, node, result)
+    -- parse access and barrier tags
+    local highway = node:get_value_by_key("highway")
+    local is_crossing = highway and highway == "crossing"
+
+    local access = find_access_tag(node, profile.access_tags_hierarchy)
+    if access and access ~= "" then
+      -- access restrictions on crossing nodes are not relevant for
+      -- the traffic on the road
+      if profile.access_tag_blacklist[access] and not is_crossing then
+        result.barrier = true
+      end
+    else
+      local barrier = node:get_value_by_key("barrier")
+      if barrier and "" ~= barrier then
+        if profile.barrier_blacklist[barrier] then
+          result.barrier = true
+        end
+      end
+    end
+
+    if profile.exclude_cargo_bike then
+      local cargo_bike = node:get_value_by_key("cargo_bike")
+      if cargo_bike and cargo_bike == "no" then
+        result.barrier = true
+      end
+    end
+
+    -- width
+    if profile.width then
+      -- From barrier=cycle_barrier or other barriers
+      local maxwidth_physical = node:get_value_by_key("maxwidth:physical")
+      local maxwidth_physical_meter = maxwidth_physical and Measure.parse_value_meters(maxwidth_physical) or 99
+      local opening = node:get_value_by_key("opening")
+      local opening_meter = opening and Measure.parse_value_meters(opening) or 99
+      local width_meter = math.min(maxwidth_physical_meter, opening_meter)
+
+      if width_meter and width_meter < profile.width then
+        result.barrier = true
+      end
+    end
+
+    -- check if node is a traffic light
+    result.traffic_lights = TrafficSignal.get_value(node)
+  end
+
+  -- Country-specific speed limits from https://wiki.openstreetmap.org/wiki/Key:maxspeed
+  -- Format: country_speeds["CC:zone"] = speed_in_kmh
+  local country_speeds = {
+      -- Argentina
+      ["AR:urban"] = 40,
+      ["AR:rural"] = 110,
+      ["AR:motorway"] = 130,
+      -- Austria
+      ["AT:urban"] = 50,
+      ["AT:rural"] = 100,
+      ["AT:motorway"] = 130,
+      ["AT:bicycle_road"] = 30,
+      -- Belarus
+      ["BY:urban"] = 60,
+      ["BY:rural"] = 90,
+      ["BY:motorway"] = 110,
+      ["BY:living_street"] = 20,
+      -- Belgium
+      ["BE:urban"] = 50,
+      ["BE:rural"] = 70,
+      ["BE:motorway"] = 120,
+      ["BE:zone30"] = 30,
+      -- Bulgaria
+      ["BG:urban"] = 50,
+      ["BG:rural"] = 90,
+      ["BG:motorway"] = 140,
+      ["BG:living_street"] = 20,
+      -- Czech Republic
+      ["CZ:urban"] = 50,
+      ["CZ:rural"] = 90,
+      ["CZ:motorway"] = 130,
+      ["CZ:living_street"] = 20,
+      ["CZ:trunk"] = 110,
+      -- Denmark
+      ["DK:urban"] = 50,
+      ["DK:rural"] = 80,
+      ["DK:motorway"] = 130,
+      -- Estonia
+      ["EE:urban"] = 50,
+      ["EE:rural"] = 90,
+      -- Finland
+      ["FI:urban"] = 50,
+      ["FI:rural"] = 80,
+      -- France
+      ["FR:urban"] = 50,
+      ["FR:rural"] = 80,
+      ["FR:motorway"] = 130,
+      ["FR:zone30"] = 30,
+      -- Germany (none = no limit, we use 150 as practical limit)
+      ["DE:urban"] = 50,
+      ["DE:rural"] = 100,
+      ["DE:motorway"] = 150,
+      ["DE:living_street"] = 7,
+      ["DE:zone30"] = 30,
+      ["DE:zone20"] = 20,
+      ["DE:bicycle_road"] = 30,
+      -- Great Britain (stored in km/h, original is mph)
+      ["GB:urban"] = 48,      -- 30 mph
+      ["GB:rural"] = 97,      -- 60 mph
+      ["GB:motorway"] = 113,  -- 70 mph
+      ["GB:nsl_single"] = 97, -- 60 mph national speed limit single carriageway
+      ["GB:nsl_dual"] = 113,  -- 70 mph national speed limit dual carriageway
+      -- Greece
+      ["GR:urban"] = 50,
+      ["GR:rural"] = 90,
+      ["GR:motorway"] = 130,
+      ["GR:living_street"] = 20,
+      -- Hungary
+      ["HU:urban"] = 50,
+      ["HU:rural"] = 90,
+      ["HU:motorway"] = 130,
+      ["HU:living_street"] = 20,
+      ["HU:trunk"] = 110,
+      -- Israel
+      ["IL:urban"] = 50,
+      ["IL:rural"] = 80,
+      ["IL:motorway"] = 110,
+      ["IL:living_street"] = 30,
+      -- India
+      ["IN:urban"] = 70,
+      ["IN:rural"] = 70,
+      ["IN:motorway"] = 120,
+      -- Indonesia
+      ["ID:urban"] = 50,
+      ["ID:rural"] = 80,
+      ["ID:motorway"] = 100,
+      ["ID:residential"] = 30,
+      -- Italy
+      ["IT:urban"] = 50,
+      ["IT:rural"] = 90,
+      ["IT:motorway"] = 130,
+      ["IT:trunk"] = 110,
+      -- Japan
+      ["JP:rural"] = 60,
+      ["JP:motorway"] = 100,
+      ["JP:nsl"] = 60,
+      -- South Korea
+      ["KR:urban"] = 50,
+      ["KR:rural"] = 60,
+      ["KR:motorway"] = 80,
+      ["KR:trunk"] = 80,
+      -- Latvia
+      ["LV:urban"] = 50,
+      ["LV:rural"] = 90,
+      -- Lithuania
+      ["LT:urban"] = 50,
+      ["LT:rural"] = 90,
+      ["LT:motorway"] = 130,
+      -- Netherlands
+      ["NL:urban"] = 50,
+      ["NL:rural"] = 80,
+      ["NL:motorway"] = 130,
+      ["NL:living_street"] = 15,
+      ["NL:zone30"] = 30,
+      -- Norway
+      ["NO:urban"] = 50,
+      ["NO:rural"] = 80,
+      -- Philippines
+      ["PH:urban"] = 40,
+      ["PH:rural"] = 80,
+      ["PH:motorway"] = 100,
+      -- Poland
+      ["PL:urban"] = 50,
+      ["PL:rural"] = 90,
+      ["PL:motorway"] = 140,
+      ["PL:trunk"] = 120,
+      ["PL:living_street"] = 20,
+      ["PL:zone30"] = 30,
+      -- Portugal
+      ["PT:urban"] = 50,
+      ["PT:rural"] = 90,
+      ["PT:motorway"] = 120,
+      ["PT:trunk"] = 100,
+      -- Romania
+      ["RO:urban"] = 50,
+      ["RO:rural"] = 90,
+      ["RO:motorway"] = 130,
+      ["RO:trunk"] = 100,
+      -- Russia
+      ["RU:urban"] = 60,
+      ["RU:rural"] = 90,
+      ["RU:motorway"] = 110,
+      ["RU:living_street"] = 20,
+      -- Serbia
+      ["RS:urban"] = 50,
+      ["RS:rural"] = 80,
+      ["RS:motorway"] = 130,
+      ["RS:trunk"] = 100,
+      -- Slovakia
+      ["SK:urban"] = 50,
+      ["SK:rural"] = 90,
+      ["SK:motorway"] = 130,
+      ["SK:living_street"] = 20,
+      ["SK:trunk"] = 130,
+      -- Slovenia
+      ["SI:urban"] = 50,
+      ["SI:rural"] = 90,
+      ["SI:motorway"] = 130,
+      ["SI:trunk"] = 110,
+      -- South Africa
+      ["ZA:urban"] = 60,
+      ["ZA:rural"] = 100,
+      ["ZA:motorway"] = 120,
+      -- Spain
+      ["ES:urban"] = 50,
+      ["ES:rural"] = 90,
+      ["ES:motorway"] = 120,
+      ["ES:living_street"] = 20,
+      ["ES:zone30"] = 30,
+      ["ES:trunk"] = 100,
+      -- Sweden
+      ["SE:urban"] = 50,
+      ["SE:rural"] = 70,
+      -- Switzerland
+      ["CH:urban"] = 50,
+      ["CH:rural"] = 80,
+      ["CH:motorway"] = 120,
+      ["CH:trunk"] = 100,
+      -- Turkey
+      ["TR:urban"] = 50,
+      ["TR:rural"] = 90,
+      ["TR:motorway"] = 120,
+      ["TR:living_street"] = 20,
+      -- Ukraine
+      ["UA:urban"] = 50,
+      ["UA:rural"] = 90,
+      ["UA:motorway"] = 130,
+      ["UA:living_street"] = 20,
+      -- Uzbekistan
+      ["UZ:urban"] = 70,
+      ["UZ:rural"] = 100,
+      ["UZ:motorway"] = 110,
+      ["UZ:living_street"] = 30,
+  }
+
+  local function parse_maxspeed(way)
+      local max_speed = way:get_value_by_key("maxspeed")
+      local max_speed_type = way:get_value_by_key("maxspeed:type")
+
+      -- Try maxspeed tag first, then maxspeed:type
+      local speed_value = max_speed or max_speed_type
+      if not speed_value then
+          return 0
+      end
+
+      -- Handle "none" (e.g., German autobahn advisory speed)
+      if speed_value == "none" then
+          return 150
+      end
+
+      -- Handle "walk" or "walking" (living streets)
+      if speed_value == "walk" or speed_value == "walking" then
+          return 6
+      end
+
+      -- Handle country:zone format (e.g., "DE:urban", "RU:motorway")
+      local country_zone = string.upper(speed_value)
+      if country_speeds[country_zone] then
+          return country_speeds[country_zone]
+      end
+
+      -- Handle numeric values with optional units
+      local num, unit = string.match(speed_value, "^(%d+)%s*(%a*)$")
+      if num then
+          local speed = tonumber(num)
+          if unit == "mph" then
+              return math.floor(speed * 1.609344 + 0.5)
+          elseif unit == "knots" then
+              return math.floor(speed * 1.852 + 0.5)
+          else
+              -- Default is km/h
+              return speed
+          end
+      end
+
+      -- Fallback to OSRM's built-in parser
+      return Measure.get_max_speed(max_speed) or 0
+  end
+
+  local function speed_handler(profile,way,result,data)
+    if (data.highway == "motorway" or data.highway == "motorway_link") then
+      result.forward_speed = 0
+      result.backward_speed = 0
+      return;
+    end
+    if (data.route == "ferry") then
+      result.forward_speed = 0
+      result.backward_speed = 0
+      return;
+    end
+    if way:get_value_by_key("seasonal") == "yes" then
+      result.forward_speed = 0
+      result.backward_speed = 0
+      return
+    end
+    data.way_type_allows_pushing = false
+    --DEBUG: if way:id() == 442985813 then
+    -- speed
+
+    local tracktype = data.tracktype
+    local lanes = data.lanes and tonumber(data.lanes) or 0
+
+    local surface = data.surface
+    -- not tracktype
+    if (not surface and data.highway ~= "tracktype") and (data.name or data.ref) and (lanes > 0 or data.maxspeed > 0) then
+      surface = "asphalt"
+    end
+
+    -- Check for NHS (major highways), HGV (truck traffic), and expressway tags
+    local nhs = way:get_value_by_key("NHS")
+    local hgv = way:get_value_by_key("hgv")
+    local expressway = way:get_value_by_key("expressway")
+
+    local speed = profile.bicycle_speeds[data.highway] or 0
+    if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
+        local good_surface = surface ~= nil and is_road_surface(surface)
+        local good_smoothness = data.smoothness == "excellent" or data.smoothness == "good"
+        if good_surface then
+          -- surface speed; an allowed-but-unlisted surface (gravel profile's permissive
+          -- is_allowed_surface) falls back to default_speed. Explicit 0 entries are preserved.
+          -- For the road profile every allowed surface is present in surface_speeds, so this
+          -- is a no-op there (behavior unchanged).
+          local surface_speed = profile.surface_speeds[surface]
+          if surface_speed == nil then surface_speed = profile.default_speed end
+          -- grade1 with good surface is fine, use surface speed directly
+          if tracktype == "grade1" then
+            speed = surface_speed
+          elseif data.highway ~= "track" or good_smoothness then
+            -- https://www.openstreetmap.org/way/489589483 (asphalt cycleway mistagged grade3 - tracktype only penalizes real tracks)
+            -- https://www.openstreetmap.org/way/222035412 (asphalt cycleway with smoothness=excellent - trust explicit smoothness)
+            speed = surface_speed
+          else
+            -- https://www.openstreetmap.org/way/153756722 (concrete:lanes but grade2 - take the worse)
+            speed = math.min(surface_speed, profile.tracktype_speeds[tracktype])
+          end
+        elseif data.highway ~= "track" and good_smoothness then
+          -- no surface tag but explicit good smoothness on a non-track way - keep the highway speed
+        else
+          speed = profile.tracktype_speeds[tracktype]
+        end
+    end
+    if (data.highway == "path" and is_road_surface(surface)) then -- https://www.openstreetmap.org/way/1163443297
+      speed = profile.default_speed
+    end
+    -- it always decrease cycleway speeds
+    if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
+      speed = profile.surface_speeds[surface]
+    end
+    -- Gravel: a known gravel-preferred surface SETS the speed (promotes up), not just caps it.
+    -- The block above only promotes surface speed INSIDE the tracktype branch, so a gravel road
+    -- WITHOUT a tracktype tag (very common) keeps the paved-highway base and ties asphalt — then a
+    -- shortest-path router takes the asphalt. Promoting here makes a tagged gravel/dirt/unpaved
+    -- surface ride at GRAVEL_SPEED so it beats asphalt. Skipped for a track WITH a tracktype, where
+    -- the tracktype branch already balanced surface vs grade (e.g. a grade5 track stays slow); the
+    -- mtb:scale and smoothness penalties below run after this and still win.
+    if cfg.profile == "gravel" and surface and not (data.highway == "track" and tracktype)
+        -- Don't promote high-traffic paved through-roads: a primary/trunk tagged asphalt would be
+        -- restored to default_speed, defeating the LOW_SPEED base (gravel.lua) that keeps gravel off
+        -- them. They then fall through to the bicycle_speeds[highway] branch and keep LOW_SPEED.
+        and not (data.highway == "primary" or data.highway == "trunk"
+                 or data.highway == "primary_link" or data.highway == "trunk_link")
+        -- Don't promote a pedestrian-PRIORITY path (foot=designated) where bikes are merely tolerated
+        -- (bicycle ~= "designated"). These are shared paths where pedestrians own the space (e.g.
+        -- foot=designated, segregated=no, surface=paving_stones -> way 713030452): promoting the paved
+        -- surface to 15 made line 791 output 15, so gravel routes rode a footpath instead of a road. Keeping
+        -- the LOW_SPEED base makes it a last-resort connector.
+        -- NOTE: the foot=designated gate is deliberate. A plain footway/path (surface=paving_stones, no
+        -- foot=designated) is a normal connector that recorded gravel rides genuinely use — e.g. the
+        -- Petrovaradin-fortress footways in the Serbia coverage rides. De-promoting ALL footways forced
+        -- 5-6 km detours around them (GravelRoutesOsrmCoverage*Test), so only the pedestrian-priority ones
+        -- are held down here. A footway/path tagged bicycle=designated is real cycle infra, handled separately.
+        and not ((data.highway == "footway" or data.highway == "pedestrian" or data.highway == "steps")
+                 and data.foot == "designated" and data.bicycle ~= "designated")
+        and profile.surface_speeds[surface] and profile.surface_speeds[surface] > speed then
+      speed = profile.surface_speeds[surface]
+    end
+    if data.mtb_scale and tonumber(data.mtb_scale) then
+      local mtb = tonumber(data.mtb_scale)
+      if cfg.profile == "gravel" then
+        -- gravel bikes ride easy MTB tracks (mtb:scale 0-1); penalize 2; avoid 3+
+        if mtb >= 3 then
+          speed = 0
+        elseif mtb >= 2 then
+          speed = math.min(speed, LOW_SPEED)
+        end
+      elseif mtb >= 0 then
+        --  https://www.openstreetmap.org/way/87329570 paved but mtb_scace=1 - be pessimistic (road)
+        speed = 0
+      end
+    end
+
+    if data.highway == "primary" or data.highway == "trunk" then
+      result.forward_mode = mode.highway_cycling
+      result.backward_mode = mode.highway_cycling
+    end
+
+    if (data.highway == "primary" or data.highway == "trunk") and (data.oneway == "yes" and lanes >= 2 and data.maxspeed > 80) then
+      -- setup LOW_SPEED for all primary & trunk?
+      result.forward_speed = 1
+      result.backward_speed = 1
+      result.forward_mode = mode.highway_cycling
+      result.backward_mode = mode.highway_cycling
+    elseif (data.highway == "tertiary" or data.highway == "secondary") and (lanes >= 2 and data.maxspeed >= 100 and speed == profile.default_speed) then
+      -- # validate on 31399133 & 143101601
+      --https://www.openstreetmap.org/way/124997720
+      local lowerSpeed = 5
+      result.forward_speed = lowerSpeed
+      result.backward_speed = lowerSpeed
+    elseif expressway == "yes" then
+      -- Avoid expressways (high-speed roads similar to highways)
+      result.forward_speed = LOW_SPEED  -- Practically avoid
+      result.backward_speed = LOW_SPEED
+      result.forward_mode = mode.highway_cycling
+      result.backward_mode = mode.highway_cycling
+    elseif nhs and (nhs == "yes" or nhs == "Interstate" or nhs == "STRAHNET") then
+      -- Avoid NHS highways (major national highways with heavy traffic)
+      result.forward_speed = LOW_SPEED  -- Practically avoid
+      result.backward_speed = LOW_SPEED
+      result.forward_mode = mode.highway_cycling
+      result.backward_mode = mode.highway_cycling
+    elseif hgv == "designated" then
+      -- Heavily penalize designated truck routes
+      result.forward_speed = 1
+      result.backward_speed = 1
+      result.forward_mode = mode.highway_cycling
+      result.backward_mode = mode.highway_cycling
+    elseif (speed >= profile.default_speed) and isRoadBicycleAllowed(profile, data) and (is_road_surface(surface) or is_road_surface(data.cycleway_surface)) then
+      -- Road bikes love (paved) cycleways -> x2. Gravel bikes prefer UNPAVED cycle infra: an unpaved
+      -- cycleway/designated lane is a dedicated gravel path we boost x2, while a paved one keeps its base
+      -- speed (mult 1) as a plain city connector -- symmetric with the designated footway/path branch and
+      -- gated by the shared boost_cycle_surface() (road->paved, gravel->unpaved).
+      local cycleWayMultiplicator = cfg.cycleway_multiplier or 2
+      if cfg.profile == "gravel" then
+        cycleWayMultiplicator = boost_cycle_surface(surface) and 2 or (cfg.cycleway_multiplier or 1)
+      end
+      if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
+        result.forward_speed = speed * cycleWayMultiplicator
+        result.backward_speed = speed * cycleWayMultiplicator
+      elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
+        result.forward_speed = speed * cycleWayMultiplicator
+        result.backward_speed = speed * cycleWayMultiplicator
+      else --https://www.openstreetmap.org/way/970634864
+        result.forward_speed = speed
+        result.backward_speed = speed
+      end
+    elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
+      result.forward_speed = profile.surface_speeds[surface] or speed
+      result.backward_speed = profile.surface_speeds[surface] or speed
+    elseif (data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface)) then
+      -- allowed-but-unlisted surface (gravel) -> fall back to the highway speed (0 is preserved: truthy in Lua)
+      result.forward_speed = profile.surface_speeds[surface] or speed
+      result.backward_speed = profile.surface_speeds[surface] or speed
+    elseif isBridgePassable(data) then
+      if not data.highway or data.highway == '' then
+        result.forward_speed = 0
+        result.backward_speed = 0
+      elseif (data.highway == "footway" and data.bicycle == "designated") then
+        result.forward_speed = 16
+        result.backward_speed = 16
+      elseif (data.highway == "footway") then
+        -- https://www.openstreetmap.org/way/352605114 - shouldn't use because we have road
+        -- https://www.openstreetmap.org/way/42965975 - should use - the only way
+        result.forward_speed = LOW_SPEED
+        result.backward_speed = LOW_SPEED
+      else
+        result.forward_speed = 16
+        result.backward_speed = 16
+      end
+      data.way_type_allows_pushing = true
+    elseif tracktype and profile.tracktype_speeds[tracktype] then
+      result.forward_speed = speed
+      result.backward_speed = speed
+      data.way_type_allows_pushing = true
+    elseif profile.route_speeds[data.route] then
+      -- ferries (doesn't cover routes tagged using relations)
+      result.forward_mode = mode.ferry
+      result.backward_mode = mode.ferry
+      -- Never use ferries for bicycle routing
+      result.forward_speed = 0
+      result.backward_speed = 0
+    -- railway platforms (old tagging scheme)
+    elseif data.railway and profile.platform_speeds[data.railway] then
+      result.forward_speed = profile.platform_speeds[data.railway]
+      result.backward_speed = profile.platform_speeds[data.railway]
+      data.way_type_allows_pushing = true
+    -- public_transport platforms (new tagging platform)
+    elseif data.public_transport and profile.platform_speeds[data.public_transport] then
+      result.forward_speed = profile.platform_speeds[data.public_transport]
+      result.backward_speed = profile.platform_speeds[data.public_transport]
+      data.way_type_allows_pushing = true
+    -- railways
+    elseif profile.use_public_transport and data.railway and profile.railway_speeds[data.railway] and profile.access_tag_whitelist[data.access] then
+      result.forward_mode = mode.train
+      result.backward_mode = mode.train
+      result.forward_speed = profile.railway_speeds[data.railway]
+      result.backward_speed = profile.railway_speeds[data.railway]
+    elseif data.amenity and profile.amenity_speeds[data.amenity] then
+      -- parking areas
+      result.forward_speed = profile.amenity_speeds[data.amenity]
+      result.backward_speed = profile.amenity_speeds[data.amenity]
+      data.way_type_allows_pushing = true
+    elseif (data.highway == "footway" or data.highway == "path") and data.bicycle == "designated" and is_road_surface(surface) then --https://www.openstreetmap.org/way/704522241
+      -- Segregated bicycle paths tagged footway/path with designated access: good cycling infra, boosted
+      -- x2 like a cycleway. The surface gate is the ONLY per-profile difference, in boost_cycle_surface():
+      -- road boosts genuinely paved paths; gravel boosts UNPAVED ones (a paved designated path on gravel
+      -- stays a plain connector at its base speed). Same split as the cycleway branch above.
+      local base_speed = profile.surface_speeds[surface] or profile.default_speed
+      if cfg.profile == "gravel" then
+        -- gravel: x2 an UNPAVED designated path (dedicated gravel cycle infra); paved stays a connector.
+        if boost_cycle_surface(surface) then
+          base_speed = base_speed * 2
+        end
+      elseif base_speed == profile.default_speed then
+        -- road: x2 a plain paved designated path (cycleway-grade); leave specific rough surfaces as-is.
+        base_speed = base_speed * 2
+      end
+      result.forward_speed = base_speed
+      result.backward_speed = base_speed
+      data.way_type_allows_pushing = true
+    elseif data.highway == "footway" and data.bicycle == "permissive" then --https://www.openstreetmap.org/way/249681202
+      result.forward_speed = 5
+      result.backward_speed = 5
+      data.way_type_allows_pushing = true
+    elseif cfg.profile == "gravel" and data.highway == "footway" then
+      -- Footway handling for gravel. A PAVED/pedestrian footway (sidewalk, asphalt, concrete, paving_stones,
+      -- untagged) is pedestrian infra running alongside a road: force it to the footway base speed
+      -- (gravel.lua footway = VERY_LOW_SPEED) so the road wins (way 164030241 sidewalk, way 736861895
+      -- asphalt footway). But a GRAVEL-surfaced footway (surface promoted above default_speed) is a real
+      -- gravel path that recorded gravel rides use — keep its promoted speed. De-promoting ALL footways
+      -- (incl. gravel ones) pushed SA routes onto a dangerous no-safe-heatmap climb (Limassol safety test,
+      -- 5/6 fail) and broke coverage legs on surface=gravel footways; keeping gravel footways fixes both.
+      -- bicycle=designated / permissive are handled by the branches above and never reach here.
+      local surf_speed = surface and profile.surface_speeds[surface]
+      if surf_speed and surf_speed > profile.default_speed then
+        result.forward_speed = speed
+        result.backward_speed = speed
+      else
+        result.forward_speed = profile.bicycle_speeds[data.highway]
+        result.backward_speed = profile.bicycle_speeds[data.highway]
+      end
+      data.way_type_allows_pushing = true
+    elseif data.cycleway == "sidewalk" and data.foot == "yes" then
+      result.forward_speed = LOW_SPEED
+      result.backward_speed = LOW_SPEED
+    elseif data.highway == "cycleway" and data.foot == "yes" and data.segregated == "no" and data.bicycle ~= "designated" and speed < profile.default_speed then
+      -- https://www.openstreetmap.org/way/3677792
+      -- good cycleways: https://www.openstreetmap.org/way/133749397 https://www.openstreetmap.org/way/133749411
+      result.forward_speed = profile.walking_speed
+      result.backward_speed = profile.walking_speed
+    elseif profile.bicycle_speeds[data.highway] then
+      -- A vehicle-road highway type WITHOUT a surface tag is paved-by-default and rideable ONLY on the
+      -- gravel profile: gravel bikes are fine on an untagged rural road, so don't crush it to
+      -- walking_speed (without this an UNTAGGED residential — no surface, no name, no bicycle tag — got
+      -- ~walking speed and OSRM detoured around it, e.g. the missed left turn at 34.715932,33.073324).
+      -- For the ROAD profile a surface-less minimally-tagged road (no name/ref/lanes/maxspeed, so the
+      -- asphalt-default heuristic above did NOT fire, e.g. `source=bing` way 180885389) is almost always
+      -- unpaved and must NOT be ridable — keep the original missing-surface walking fallback for it.
+      local is_vehicle_road = data.highway == "residential" or data.highway == "unclassified"
+          or data.highway == "tertiary" or data.highway == "secondary" or data.highway == "primary"
+          or data.highway == "living_street" or data.highway == "road"
+      if speed >= profile.default_speed and not surface and not (is_vehicle_road and cfg.profile == "gravel") then
+        if (data.highway == "cycleway" or data.bicycle == "designated") then
+          speed = profile.walking_speed * 2
+        else
+          speed = profile.walking_speed
+        end
+      end
+      if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
+        speed = profile.surface_speeds[surface]
+      end
+      result.forward_speed = speed
+      result.backward_speed = speed
+      data.way_type_allows_pushing = true
+  --   elseif data.access and profile.access_tag_whitelist[data.access]  then -- https://www.openstreetmap.org/way/33475758
+  --     -- unknown way, but valid access tag
+  --     local speed = profile.default_speed
+  --     if not data.surface then
+  --       speed = speed / 3
+  --     end
+  --     result.forward_speed = speed
+  --     result.backward_speed = speed
+  --     data.way_type_allows_pushing = true
+    end
+
+    -- Gravel: a bare track/path/bridleway with NO road specifics (no surface, tracktype, smoothness,
+    -- or mtb:scale) is an "unknown gravel" way. Ride it at medium_speed: above asphalt (default_speed)
+    -- so it's preferred over paved connectors, but below a known-good gravel surface (GRAVEL_SPEED) and
+    -- not above a known rough surface — explicit tagging always wins. Heatmap popularity then breaks ties.
+    -- (Without this they kept default_speed = asphalt, so a paved road of equal length always won.)
+    if cfg.profile == "gravel"
+        and (data.highway == "track" or data.highway == "path" or data.highway == "bridleway")
+        and not surface and not tracktype and not data.smoothness and not data.mtb_scale then
+      if result.forward_mode ~= mode.inaccessible and result.forward_speed and result.forward_speed > 0 then
+        result.forward_speed = cfg.medium_speed
+      end
+      if result.backward_mode ~= mode.inaccessible and result.backward_speed and result.backward_speed > 0 then
+        result.backward_speed = cfg.medium_speed
+      end
+    end
+
+    if data.smoothness and profile.smoothness_speeds[data.smoothness] ~= nil then
+      local smoothness_speed = profile.smoothness_speeds[data.smoothness]
+      if smoothness_speed == 0 then
+        -- gravel keeps rough-but-rideable smoothness usable (medium_speed) so recorded gravel rides
+        -- on horrible-smoothness tracks are followed; road keeps the punitive LOW_SPEED (medium_speed nil).
+        local rough_speed = cfg.medium_speed or LOW_SPEED
+        if is_road_surface(surface) then -- https://www.openstreetmap.org/way/938099187 https://www.openstreetmap.org/way/454657895
+          result.forward_speed = rough_speed
+          result.backward_speed = rough_speed
+        else
+          result.forward_speed = 0
+          result.backward_speed = 0
+        end
+      end
+    end
+
+    if not isRoadBicycleAllowed(profile, data) and result.forward_speed > 0 and (lanes >= 2 and data.oneway == "yes" and data.maxspeed >= 80 and (data.highway == "primary" or data.highway == "trunk")) then
+      result.forward_speed = result.forward_speed / 10
+      result.backward_speed = result.backward_speed / 10
+    end
+
+    -- Boost roads that explicitly prohibit trucks (likely quieter for cycling)
+    if hgv == "no" and result.forward_speed > 0 then
+      result.forward_speed = result.forward_speed * 1.2
+      result.backward_speed = result.backward_speed * 1.2
+    end
+  end
+
+  local function oneway_handler(profile,way,result,data)
+    -- oneway
+    data.implied_oneway = data.junction == "roundabout" or data.junction == "circular" or data.highway == "motorway"
+    data.reverse = false
+
+    if data.oneway_bicycle == "yes" or data.oneway_bicycle == "1" or data.oneway_bicycle == "true" then
+      result.backward_mode = mode.inaccessible
+    elseif data.oneway_bicycle == "no" or data.oneway_bicycle == "0" or data.oneway_bicycle == "false" then
+     -- prevent other cases
+    elseif data.oneway_bicycle == "-1" then
+      result.forward_mode = mode.inaccessible
+      data.reverse = true
+    elseif data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" then
+      result.backward_mode = mode.inaccessible
+    elseif data.oneway == "no" or data.oneway == "0" or data.oneway == "false" then
+      -- prevent other cases
+    elseif data.oneway == "-1" then
+      result.forward_mode = mode.inaccessible
+      data.reverse = true
+    elseif data.implied_oneway then
+      result.backward_mode = mode.inaccessible
+    end
+  end
+
+  local function cycleway_handler(profile,way,result,data)
+    -- cycleway
+    data.has_cycleway_forward = false
+    data.has_cycleway_backward = false
+  --data.is_twoway = result.forward_mode ~= mode.inaccessible and result.backward_mode ~= mode.inaccessible and not data.implied_oneway https://github.com/Project-OSRM/osrm-backend/issues/7138
+    data.is_twoway = data.forward_mode ~= mode.inaccessible and data.backward_mode ~= mode.inaccessible and not data.implied_oneway
+
+    -- cycleways on normal roads
+    if data.is_twoway then
+      if data.cycleway and profile.cycleway_tags[data.cycleway] then
+        data.has_cycleway_backward = true
+        data.has_cycleway_forward = true
+      end
+      if (data.cycleway_right and profile.cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left]) then
+        data.has_cycleway_forward = true
+      end
+      if (data.cycleway_left and profile.cycleway_tags[data.cycleway_left]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right]) then
+        data.has_cycleway_backward = true
+      end
+    else
+      local has_twoway_cycleway = (data.cycleway and profile.opposite_cycleway_tags[data.cycleway]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left])
+      local has_opposite_cycleway = (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right])
+      local has_oneway_cycleway = (data.cycleway and profile.cycleway_tags[data.cycleway]) or (data.cycleway_right and profile.cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.cycleway_tags[data.cycleway_left])
+
+      -- set cycleway even though it is an one-way if opposite is tagged
+      if has_twoway_cycleway then
+        data.has_cycleway_backward = true
+        data.has_cycleway_forward = true
+      elseif has_opposite_cycleway then
+        if not data.reverse then
+          data.has_cycleway_backward = true
+        else
+          data.has_cycleway_forward = true
+        end
+      elseif has_oneway_cycleway then
+        if not data.reverse then
+          data.has_cycleway_forward = true
+        else
+          data.has_cycleway_backward = true
+        end
+
+      end
+    end
+
+    if data.has_cycleway_backward then
+      result.backward_mode = mode.cycling
+      result.backward_speed = profile.bicycle_speeds["cycleway"]
+    end
+
+    if data.has_cycleway_forward then
+      result.forward_mode = mode.cycling
+      result.forward_speed = profile.bicycle_speeds["cycleway"]
+    end
+  end
+
+  local function width_handler(profile,way,result,data)
+    if profile.exclude_cargo_bike then
+      local cargo_bike = way:get_value_by_key("cargo_bike")
+      if cargo_bike and cargo_bike == "no" then
+        result.forward_mode = mode.inaccessible
+        result.backward_mode = mode.inaccessible
+      end
+    end
+
+    if profile.width then
+      local width = way:get_value_by_key("width")
+      if width then
+        local width_meter = Measure.parse_value_meters(width)
+        if width_meter and width_meter < profile.width then
+          result.forward_mode = mode.inaccessible
+          result.backward_mode = mode.inaccessible
+        end
+      end
+    end
+  end
+
+  local function bike_push_handler(profile,way,result,data)
+    if (data.route == "ferry") then
+      return;
+    end
+    -- pushing bikes - if no other mode found
+    if result.forward_mode == mode.inaccessible or result.backward_mode == mode.inaccessible or
+      result.forward_speed == -1 or result.backward_speed == -1 then
+      if data.foot ~= 'no' then
+        local push_forward_speed = nil
+        local push_backward_speed = nil
+
+        if profile.pedestrian_speeds[data.highway] then
+          push_forward_speed = profile.pedestrian_speeds[data.highway]
+          push_backward_speed = profile.pedestrian_speeds[data.highway]
+        elseif data.man_made and profile.man_made_speeds[data.man_made] then
+          push_forward_speed = profile.man_made_speeds[data.man_made]
+          push_backward_speed = profile.man_made_speeds[data.man_made]
+        else
+          if data.foot == 'yes' then
+            push_forward_speed = profile.walking_speed
+            if not data.implied_oneway then
+              push_backward_speed = profile.walking_speed
+            end
+          elseif data.foot_forward == 'yes' then
+            push_forward_speed = profile.walking_speed
+          elseif data.foot_backward == 'yes' then
+            push_backward_speed = profile.walking_speed
+          elseif data.way_type_allows_pushing then
+            push_forward_speed = profile.walking_speed
+            if not data.implied_oneway and not (data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" or data.oneway == "-1") then
+              push_backward_speed = profile.walking_speed
+            end
+          end
+        end
+
+        if push_forward_speed and (result.forward_mode == mode.inaccessible or result.forward_speed == -1) then
+          result.forward_mode = mode.pushing_bike
+          result.forward_speed = push_forward_speed
+        end
+        if push_backward_speed and (result.backward_mode == mode.inaccessible or result.backward_speed == -1)then
+          result.backward_mode = mode.pushing_bike
+          result.backward_speed = push_backward_speed
+        end
+
+      end
+
+    end
+
+    -- dismount
+    if data.bicycle == "dismount" then
+      result.forward_mode = mode.pushing_bike
+      result.backward_mode = mode.pushing_bike
+      result.forward_speed = VERY_LOW_SPEED
+      result.backward_speed = VERY_LOW_SPEED
+    end
+  end
+
+  local function safety_handler(profile,way,result,data)
+    -- convert duration into cyclability
+    if profile.properties.weight_name == 'cyclability' then
+      local safety_penalty = profile.unsafe_highway_list[data.highway] or 1.
+      local is_unsafe = safety_penalty < 1
+
+      -- primaries that are one ways are probably huge primaries where the lanes need to be separated
+      if is_unsafe and data.highway == 'primary' and not data.is_twoway then
+        safety_penalty = safety_penalty * 0.5
+      end
+      if is_unsafe and data.highway == 'secondary' and not data.is_twoway then
+        safety_penalty = safety_penalty * 0.6
+      end
+
+      local forward_is_unsafe = is_unsafe and not data.has_cycleway_forward
+      local backward_is_unsafe = is_unsafe and not data.has_cycleway_backward
+      local is_undesireable = data.highway == "service" and profile.service_penalties[data.service]
+      local forward_penalty = 1.
+      local backward_penalty = 1.
+      if forward_is_unsafe then
+        forward_penalty = math.min(forward_penalty, safety_penalty)
+      end
+      if backward_is_unsafe then
+         backward_penalty = math.min(backward_penalty, safety_penalty)
+      end
+
+      if is_undesireable then
+         forward_penalty = math.min(forward_penalty, profile.service_penalties[data.service])
+         backward_penalty = math.min(backward_penalty, profile.service_penalties[data.service])
+      end
+
+      if result.forward_speed > 0 then
+        -- convert from km/h to m/s
+        result.forward_rate = result.forward_speed / 3.6 * forward_penalty
+      end
+      if result.backward_speed > 0 then
+        -- convert from km/h to m/s
+        result.backward_rate = result.backward_speed / 3.6 * backward_penalty
+      end
+      if result.duration > 0 then
+        result.weight = result.duration / forward_penalty
+      end
+    end
+  end
+
+  local function handle_bicycle_tags(profile,way,result,data)
+      -- initial routability check, filters out buildings, boundaries, etc
+    data.route = way:get_value_by_key("route")
+    data.man_made = way:get_value_by_key("man_made")
+    data.railway = way:get_value_by_key("railway")
+    data.amenity = way:get_value_by_key("amenity")
+    data.public_transport = way:get_value_by_key("public_transport")
+    data.bridge = way:get_value_by_key("bridge")
+    data.construction = way:get_value_by_key("construction")
+
+    if (not data.highway or data.highway == '') and
+    (not data.route or data.route == '') and
+    (not profile.use_public_transport or not data.railway or data.railway=='') and
+    (not data.amenity or data.amenity=='') and
+    (not data.man_made or data.man_made=='') and
+    (not data.public_transport or data.public_transport=='') and
+    (not data.bridge or data.bridge=='')
+    then
+      return false
+    end
+
+    -- access
+    data.access = find_access_tag(way, profile.access_tags_hierarchy)
+    if data.access and profile.access_tag_blacklist[data.access] then
+      return false
+    end
+
+    -- other tags
+    data.junction = way:get_value_by_key("junction")
+    data.maxspeed = parse_maxspeed(way)
+    data.maxspeed_forward = Measure.get_max_speed(way:get_value_by_key("maxspeed:forward")) or 0
+    data.maxspeed_backward = Measure.get_max_speed(way:get_value_by_key("maxspeed:backward")) or 0
+    data.barrier = way:get_value_by_key("barrier")
+    data.oneway = way:get_value_by_key("oneway")
+    data.oneway_bicycle = way:get_value_by_key("oneway:bicycle")
+    data.cycleway = way:get_value_by_key("cycleway")
+    data.cycleway_left = way:get_value_by_key("cycleway:left")
+    data.cycleway_right = way:get_value_by_key("cycleway:right")
+    data.cycleway_both = way:get_value_by_key("cycleway:both")
+    data.cycleway_surface = way:get_value_by_key("cycleway:surface")
+    data.busway = way:get_value_by_key("busway")
+    data.busway_left = way:get_value_by_key("busway:left")
+    data.busway_right = way:get_value_by_key("busway:right")
+    data.busway_both = way:get_value_by_key("busway:both")
+    data.duration = way:get_value_by_key("duration")
+    data.service = way:get_value_by_key("service")
+    data.tracktype = way:get_value_by_key("tracktype")
+    data.mtb_scale = way:get_value_by_key("mtb:scale")
+    data.foot = way:get_value_by_key("foot")
+    data.foot_forward = way:get_value_by_key("foot:forward")
+    data.foot_backward = way:get_value_by_key("foot:backward")
+    data.bicycle = way:get_value_by_key("bicycle")
+    data.bicycle_road = way:get_value_by_key("bicycle_road")
+    data.cyclestreet = way:get_value_by_key("cyclestreet")
+    data.footway = way:get_value_by_key("footway")
+    data.lanes = way:get_value_by_key("lanes")
+    data.segregated =  way:get_value_by_key("segregated")
+    data.name = way:get_value_by_key("name")
+    data.ref = way:get_value_by_key("ref")
+    data.lit = way:get_value_by_key("lit")
+
+    --cycleway_handler(profile,way,result,data)
+    speed_handler(profile,way,result,data)
+
+    oneway_handler(profile,way,result,data)
+
+    bike_push_handler(profile,way,result,data)
+
+    -- width should be after bike_push
+    --width_handler(profile,way,result,data)
+
+    -- maxspeed
+    limit( result, data.maxspeed, data.maxspeed_forward, data.maxspeed_backward )
+
+    -- not routable if no speed assigned
+    -- this avoid assertions in debug builds
+    if result.forward_speed <= 0 and result.duration <= 0 then
+      result.forward_mode = mode.inaccessible
+    end
+    if result.backward_speed <= 0 and result.duration <= 0 then
+      result.backward_mode = mode.inaccessible
+    end
+
+    safety_handler(profile,way,result,data)
+  end
+
+  local function get_cycle_network_speed_boost(way, relations, profile)
+    local boost = 1.0
+
+    if not relations then
+      return boost
+    end
+
+
+    local rel_id_list = relations:get_relations(way)
+
+    for i, rel_id in ipairs(rel_id_list) do
+      local rel = relations:relation(rel_id)
+      local rel_id_num = rel:id()
+
+      local rel_type = rel:get_value_by_key('type')
+      local route_type = rel:get_value_by_key('route')
+      local network = rel:get_value_by_key('network')
+
+      local is_cycling_relation = false
+
+      if rel_type == 'route' and profile.cycleway_route_types[route_type] then
+        is_cycling_relation = true
+      elseif rel_type == 'route_master' and profile.cycleway_route_types[route_type] then
+        is_cycling_relation = true
+      elseif rel_type == 'network' then
+        local network_type = rel:get_value_by_key('network')
+        if network_type and profile.cycleway_network_types[network_type] then
+          is_cycling_relation = true
+          network = network_type  -- Use network type for boost calculation
+        end
+      end
+
+      if is_cycling_relation then
+        if network and profile.cycleway_network_types[network] then
+          -- Apply speed boost based on network hierarchy
+          if network == 'lcn' then        -- Local cycling network
+            boost = 2.5
+          elseif network == 'rcn' then    -- Regional cycling network
+            boost = 2.6
+          elseif network == 'ncn' then    -- National cycling network
+            boost = 2.7
+          elseif network == 'icn' then    -- International cycling network
+            boost = 2.8
+          end
+        else
+          boost = 3
+        end
+      end
+    end
+    return boost
+  end
+
+  local function process_way(profile, way, result, relations)
+    -- the initial filtering of ways based on presence of tags
+    -- affects processing times significantly, because all ways
+    -- have to be checked.
+    -- to increase performance, prefetching and initial tag check
+    -- is done directly instead of via a handler.
+
+    -- in general we should try to abort as soon as
+    -- possible if the way is not routable, to avoid doing
+    -- unnecessary work. this implies we should check things that
+    -- commonly forbids access early, and handle edge cases later.
+
+    -- data table for storing intermediate values during processing
+
+    local data = {
+      -- prefetch tags
+      highway = way:get_value_by_key('highway'),
+      surface = way:get_value_by_key('surface'),
+      smoothness = way:get_value_by_key('smoothness'),
+
+      route = nil,
+      man_made = nil,
+      railway = nil,
+      amenity = nil,
+      public_transport = nil,
+      bridge = nil,
+
+      access = nil,
+
+      junction = nil,
+      maxspeed = nil,
+      maxspeed_forward = nil,
+      maxspeed_backward = nil,
+      barrier = nil,
+      oneway = nil,
+      oneway_bicycle = nil,
+      cycleway = nil,
+      cycleway_left = nil,
+      cycleway_right = nil,
+      cycleway_both = nil,
+      busway = nil,
+      busway_left = nil,
+      busway_right = nil,
+      busway_both = nil,
+      duration = nil,
+      service = nil,
+      foot = nil,
+      foot_forward = nil,
+      foot_backward = nil,
+      bicycle = nil,
+
+      way_type_allows_pushing = false,
+      has_cycleway_forward = false,
+      has_cycleway_backward = false,
+      is_twoway = true,
+      reverse = false,
+      implied_oneway = false
+    }
+
+    local handlers = Sequence {
+      -- set the default mode for this profile. if can be changed later
+      -- in case it turns we're e.g. on a ferry
+      WayHandlers.default_mode,
+
+      -- check various tags that could indicate that the way is not
+      -- routable. this includes things like status=impassable,
+      -- toll=yes and oneway=reversible
+      WayHandlers.blocked_ways,
+
+      -- compute speed taking into account way type, maxspeed tags, etc.
+      WayHandlers.surface,
+
+      -- our main handler
+      handle_bicycle_tags,
+
+      -- handle turn lanes and road classification, used for guidance
+      WayHandlers.classification,
+
+      -- handle allowed start/end modes
+      WayHandlers.startpoint,
+
+      -- handle roundabouts
+      WayHandlers.roundabouts,
+
+      -- set name, ref and pronunciation
+      WayHandlers.names,
+
+      -- set classes
+      WayHandlers.classes,
+
+      -- set weight properties of the way
+      WayHandlers.weights,
+
+      -- determine driving side (left/right) based on location
+      WayHandlers.driving_side,
+
+      --Relations.process_way_refs(way, relations, result)
+    }
+
+    WayHandlers.run(profile, way, result, data, handlers)
+
+    if relations then
+      local is_good_cycling_infrastructure = false
+
+      if data.highway == "cycleway" then
+        is_good_cycling_infrastructure = true
+      elseif (data.highway == "track" or data.highway == "residential") and data.surface and is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/340134972 https://www.openstreetmap.org/way/100520383
+        is_good_cycling_infrastructure = true
+      end
+
+      if is_good_cycling_infrastructure then
+        local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
+        if speed_boost > 1.0 then
+          local forward_speed = profile.default_speed
+          local backward_speed = profile.default_speed
+
+          if (result.forward_speed < forward_speed) then
+            forward_speed = result.forward_speed
+          end
+          if (result.backward_speed < backward_speed) then
+            backward_speed = result.backward_speed
+          end
+          if forward_speed > 0 then
+            result.forward_speed = forward_speed * speed_boost
+            result.backward_speed = backward_speed * speed_boost
+          else
+            result.forward_speed = 5
+            result.backward_speed = 5
+            result.forward_mode = mode.cycling
+            result.backward_mode = mode.cycling
+          end
+        end
+      end
+    end
+
+    if data.highway == "cycleway" then
+      result.highway_turn_classification = 1
+    elseif data.junction == "roundabout" or data.junction == "circular" then
+      -- Tier 4: roundabout ring segment. Circulating the ring produces a chain of
+      -- slight "turns" at every arm node that can sum to 100s+ for a 60m ring
+      -- (Tartu Teemandi roundabout), so process_turn caps ring->ring turns.
+      result.highway_turn_classification = 4
+    else
+      -- Tier 2: regular road with bike-specific infrastructure.
+      -- Turning ONTO such a road is cheaper than a generic 3-lane road,
+      -- but still more expensive than turning onto a dedicated cycleway.
+      local friendly = profile.turn_friendly_cycleway_tags
+      local has_cycleway_infra =
+        (data.cycleway and friendly[data.cycleway]) or
+        (data.cycleway_left and friendly[data.cycleway_left]) or
+        (data.cycleway_right and friendly[data.cycleway_right]) or
+        (data.cycleway_both and friendly[data.cycleway_both])
+      local has_busway_lane =
+        data.busway == "lane" or data.busway_left == "lane" or
+        data.busway_right == "lane" or data.busway_both == "lane"
+      if has_cycleway_infra or has_busway_lane then
+        result.highway_turn_classification = 2
+      else
+        local maxspeed = data.maxspeed or 0
+        local is_calm = (maxspeed > 0 and maxspeed <= 40)
+        if is_calm then
+          result.highway_turn_classification = 3
+        end
+      end
+    end
+
+    -- Gravel: speed-0 accessible ways are LEFT excluded from the routing graph (speed 0 -> dropped),
+    -- exactly like the road profile -- NO very_low_speed clamp here. An earlier version bumped every
+    -- accessible speed-0 way (mud/woodchips/worst-smoothness/unknown-type -- the junk the road profile
+    -- drops) to very_low_speed so it would stay matchable for future GPX map-matching. But routing and
+    -- matching share one graph: that put those ways back as ~0.5 km/h stubs, and recorded points SNAPPED
+    -- to a nearby junk stub instead of the real parallel road. Because the stubs are dead-ends / poorly
+    -- connected, leg routing then detoured 14-27 km to reach the snapped point (osrm-routed showed 0.36
+    -- km/h arrival segments). Real recorded gravel rides run on real roads / tagged gravel, not these
+    -- stubs, so the stubs MUST stay excluded for coverage to pass. Speed tuning can't fix it (snapping is
+    -- distance-based; a normal-speed stub still detours the same distance). If speed-0 GPX matchability is
+    -- wanted later, build a dedicated match graph rather than polluting the routing graph.
+  end
+
+  local function process_turn(profile, turn)
+    local MAX_TURN_PENALTY = 2000
+    if turn.source_speed > profile.default_speed or turn.target_speed > profile.default_speed then
+      MAX_TURN_PENALTY = 30
+    end
+    -- Don't apply turn penalty for going straight (angles close to 0 or 180)
+    -- Intersection - is 180 turn in OSRM
+    -- But U-turns should still get penalty
+
+  --   print("Turn: angle=" .. turn.angle)
+    local angle_abs = math.abs(turn.angle)
+
+    -- Handle U-turns first with a simple base penalty
+    if turn.is_u_turn then
+      turn.duration = 1000
+    -- No penalty for nearly straight movements
+    elseif angle_abs < 10 then
+      turn.duration = 0
+    elseif angle_abs > 170 then
+      -- Going straight through intersection (around 180 degrees)
+      turn.duration = 0
+    else
+      -- Progressive penalty based on turn angle
+      -- Small angles get small penalties, large angles get larger penalties
+      -- Using a more linear approach with slight exponential growth
+
+      local angle_factor = angle_abs / 180.0  -- Normalize to 0-1
+
+      -- TODO: make 180 & uncomment limit with MAX_TURN_PENALTY
+      -- Coefficient lowered 120 -> 40: the old value produced ~72-117s for a single
+      -- junction turn, so in dense intersection areas (Tartu Põvvatu/Luunja, Limassol
+      -- Fragklinou Rousvelt) a 2-3 turn direct route could cost 300-700s in turns alone
+      -- and lose to a longer turn-avoiding detour. 40 gives realistic cycling turn costs
+      -- (~10-40s) while preserving the angle/cross-traffic/lane structure below.
+      local base_penalty = 70 * angle_factor * (1 + angle_factor)
+
+      -- Adjust turn bias based on driving side
+      -- In left-hand driving (UK, Cyprus, etc.): right turns cross traffic (more expensive)
+      -- In right-hand driving: left turns cross traffic (more expensive)
+      local is_left_hand_driving = turn.is_left_hand_driving
+      local source_number_of_lanes = turn.source_number_of_lanes or 1
+      if (source_number_of_lanes == 0) then
+        source_number_of_lanes = 1
+      end
+      if (source_number_of_lanes > 5) then
+        source_number_of_lanes = 5
+      end
+
+      -- Apply turn bias for left vs right turns
+      if turn.angle >= 0.0 then
+        -- Right turn
+  --       print("Turn1: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
+        if is_left_hand_driving then
+          -- Right turns cross traffic in left-hand driving countries (UK, Cyprus, etc.)
+          turn.duration = base_penalty * profile.turn_bias * 1.5 * source_number_of_lanes
+        else
+          -- Right turns are easier in right-hand driving countries
+          turn.duration = base_penalty / profile.turn_bias
+        end
+      else
+        -- Left turn
+  --       print("Turn2: angle=" .. turn.angle .. ", base_penalty=" .. tostring(base_penalty) .. " turn_bias: " .. tostring(profile.turn_bias) .. " source_number_of_lanes: ".. tostring(source_number_of_lanes))
+        if not is_left_hand_driving then
+          -- Left turns cross traffic in right-hand driving countries
+          turn.duration = base_penalty * profile.turn_bias * 1.5 * source_number_of_lanes
+        else
+          -- Left turns are easier in left-hand driving countries
+          turn.duration = base_penalty / profile.turn_bias
+        end
+      end
+    end
+
+    if turn.is_u_turn then
+      turn.duration = turn.duration + profile.properties.u_turn_penalty
+    end
+
+    if turn.has_traffic_light then
+       turn.duration = turn.duration + profile.properties.traffic_light_penalty
+    end
+
+    local source_is_highway = (turn.source_mode == mode.highway_cycling)
+    local target_is_highway = (turn.target_mode == mode.highway_cycling)
+    -- A *_link ramp is the designated entrance/exit of a trunk/primary - entering the highway
+    -- there is the normal transition and must not be punished, otherwise OSRM detours kilometers
+    -- to a junction where a fast cycleway caps the penalty (Tartu: Teemandi trunk_link -> Lääneringtee).
+    local via_link_ramp = turn.source_is_link or turn.target_is_link
+    -- HIGHWAY_MODE_CHANGE_PENALTY: cost of getting on/off a primary/trunk (highway_cycling
+    -- mode). Kept as high as possible to discourage needless hopping on/off main roads, but it
+    -- must stay low enough that a genuinely quieter parallel corridor (which has to leave the
+    -- primary and rejoin, paying this twice) can still win over staying on the high-traffic primary.
+    -- Limassol case (start 34.9094,33.0581 -> 34.9149,33.0726): the quiet corridor costs ~533 +
+    -- 2*PENALTY (two mode changes) and the high-traffic primary costs a fixed 632. So the quiet
+    -- route wins only while 533 + 2*PENALTY < 632, i.e. PENALTY <= 49. Empirically 49 -> quiet
+    -- route (weight 631); 50 -> primary route (632). Margin is ~1s, so this is the literal maximum.
+    local HIGHWAY_MODE_CHANGE_PENALTY = 49
+    if (source_is_highway ~= target_is_highway) and not via_link_ramp then
+      turn.duration = turn.duration + HIGHWAY_MODE_CHANGE_PENALTY
+    end
+    turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
+
+    --"cycleway"
+    local source_is_fast_cycleway = is_fast_road(turn.source_speed, profile)
+    local target_is_fast_cycleway = is_fast_road(turn.target_speed, profile)
+    if (source_is_fast_cycleway or target_is_fast_cycleway) then
+      if turn.source_highway_turn_classification == 1 or turn.target_highway_turn_classification == 1 then
+        --turn.duration = math.min(turn.duration, 29)
+        turn.duration = 0
+        --turn_friendly_cycleway_tags
+      elseif turn.source_highway_turn_classification == 2 or turn.target_highway_turn_classification == 2 then
+        turn.duration = math.min(turn.duration, 39)
+        --low speed
+      elseif turn.source_highway_turn_classification == 3 or turn.target_highway_turn_classification == 3
+          or turn.source_highway_turn_classification == 4 or turn.target_highway_turn_classification == 4 then
+        turn.duration = math.min(turn.duration, 49)
+      else
+        -- Any other turn between fast roads (e.g. a sharp right turn from a
+        -- residential street onto a 2-lane primary like Leoforos Amathountos).
+        -- Such a turn can accumulate a very large penalty (right-turn cross-traffic
+        -- x lanes + the +600 highway mode-change), exceeding the ~1000 cost of a
+        -- 500m out-and-back "lollipop" (U-turn on the dual carriageway), so OSRM
+        -- prefers the detour. We keep the turn expensive (it IS a bad turn) but cap
+        -- it below the detour cost so a single direct turn is never worse than a
+        -- 500m loop. Normal turns (< cap) are unaffected.
+        turn.duration = math.min(turn.duration, 600) -- increase more?
+      end
+    end
+
+    -- Circulating inside a roundabout ring is continuous riding, not discrete turns
+    -- (Tartu Teemandi: 3-4 slight-left ring "turns" summed to ~90s for a 60m ring,
+    -- making OSRM overshoot 1.1km past the destination instead of using the ring).
+    if turn.source_highway_turn_classification == 4 and turn.target_highway_turn_classification == 4 then
+      turn.duration = math.min(turn.duration, 5)
+    end
+
+  --   if profile.properties.weight_name == 'cyclability' then
+  --     turn.weight = turn.duration
+  --   end
+  --   if turn.source_mode == mode.cycling and turn.target_mode ~= mode.cycling then
+  --     turn.weight = turn.weight + profile.properties.mode_change_penalty
+  --   end
+  end
+
+  return {
+    setup = setup,
+    process_way = process_way,
+    process_node = process_node,
+    process_turn = process_turn
+  }
+end
+
+return BikeCommon
