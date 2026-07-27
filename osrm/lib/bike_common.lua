@@ -45,13 +45,37 @@ function BikeCommon.make_profile(cfg)
   -- for the cycleway-like speed boost. The surface gate is the only per-profile difference, kept here so
   -- the boost branches themselves stay shared (not copied):
   --   road   -> boost genuinely PAVED paths (is_road_surface) — road bikes prefer smooth cycle infra.
-  --   gravel -> boost UNPAVED paths — gravel bikes prefer dedicated unpaved cycle infra; a paved cycle
-  --             path stays a plain connector (no boost).
+  --   gravel -> boost UNPAVED paths; a NO-surface cycleway/designated path counts as unpaved too (assume
+  --             not paved — a bare cycleway/Radweg is dedicated cycle infra a gravel bike rides gladly, so
+  --             it should not collapse to the plain paved-connector speed). Only an EXPLICITLY paved
+  --             surface stays a connector (no boost).
   local function boost_cycle_surface(surface)
     if cfg.profile == "gravel" then
-      return surface ~= nil and not paved_surfaces[surface]
+      return surface == nil or not paved_surfaces[surface]
     end
     return is_road_surface(surface)
+  end
+
+  -- GRAVEL ONLY: ride an unpaved way still tagged highway=construction when its last on-the-ground survey
+  -- (check_date) is at least ~3 months old. A construction way is normally dropped entirely (WayHandlers.
+  -- blocked_ways), but a compacted/gravel path surveyed a quarter-year ago as "construction" is almost
+  -- always finished by now (check_date is always a PAST date -- when a mapper last verified the tags --
+  -- so we require it to be old, not merely present). Gated to gravel + explicitly unpaved surface so a
+  -- genuinely torn-up paved road, or a freshly-surveyed one, stays blocked. The graph's "today" is its
+  -- build date (os.time at extract), so rebuilding re-evaluates staleness.
+  local CONSTRUCTION_MIN_AGE_DAYS = 90   -- ~3 months
+  local function construction_ride_allowed(way, data)
+    if cfg.profile ~= "gravel" then return false end
+    if data.highway ~= "construction" then return false end
+    -- unpaved only: needs an explicit non-paved surface (compacted/gravel/ground/...); bare or paved stays blocked
+    if not data.surface or paved_surfaces[data.surface] then return false end
+    local cd = way:get_value_by_key("check_date")
+    if not cd then return false end
+    local y, mo, d = cd:match("^(%d%d%d%d)%-(%d%d?)%-(%d%d?)")
+    if not y then return false end   -- require full YYYY-MM-DD; partial/garbage dates stay blocked
+    local surveyed = os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d), hour = 12 })
+    if not surveyed then return false end
+    return (os.time() - surveyed) / 86400.0 >= CONSTRUCTION_MIN_AGE_DAYS
   end
 
   -- Whether a turn leg's speed counts as a full-speed ("fast") road.
@@ -168,7 +192,10 @@ function BikeCommon.make_profile(cfg)
     return {
       properties = {
         u_turn_penalty                = 1000,
-        traffic_light_penalty         = 10,
+        -- Gravel bumps this to 20 (paired with the gravel-only signalized-crossing detection above) so
+        -- crossing-dense corridors are discouraged; road keeps its original 10 -- the UK distance tests are
+        -- calibrated to it and it must stay unchanged.
+        traffic_light_penalty         = (cfg.profile == "gravel") and 60 or 10,
   --       traffic_light_penalty         = 30,
         --weight_name                   = 'cyclability',
         weight_name                   = 'duration',
@@ -215,8 +242,12 @@ function BikeCommon.make_profile(cfg)
       access_tag_blacklist = Set {
         'no',
         'private',
-        'agricultural',
-        'forestry',
+        -- 'agricultural' and 'forestry' are PURPOSE restrictions on motor/farm/logging traffic, NOT a
+        -- "keep out" like no/private. The farm- and forest-access tracks they mark are open to bicycles
+        -- under right-to-roam (e.g. Germany/Saxony forest roads) and are exactly the gravel these rides
+        -- use. Shared by road + gravel (bike_common); an explicit bicycle=no/private still blocks because
+        -- the access hierarchy (bicycle > vehicle > access) is checked first. e.g. OSM way 794555859
+        -- (highway=track surface=compacted access=forestry, Leipzig) is now rideable.
         'delivery',
         -- When a way is tagged with `use_sidepath` a parallel way suitable for
         -- cyclists is mapped and must be used instead (by law). This tag is
@@ -393,14 +424,20 @@ function BikeCommon.make_profile(cfg)
     local is_crossing = highway and highway == "crossing"
 
     local access = find_access_tag(node, profile.access_tags_hierarchy)
+    local barrier = node:get_value_by_key("barrier")
+    -- A lift_gate (liftable boom/vehicle gate, e.g. a park/forest access barrier) tagged access=no
+    -- restricts MOTOR traffic; bikes and pedestrians pass it (these are typically foot=yes). Treat
+    -- lift_gate + access=no as legal for bikes on BOTH road and gravel so OSRM does not hard-block the
+    -- passage -- e.g. OSM nodes 2758568369 / 2758568400 (Leipzig). Without this the access=no below
+    -- would barrier the node and force a long detour around the gate.
+    local is_passable_lift_gate = (barrier == "lift_gate" and access == "no")
     if access and access ~= "" then
       -- access restrictions on crossing nodes are not relevant for
       -- the traffic on the road
-      if profile.access_tag_blacklist[access] and not is_crossing then
+      if profile.access_tag_blacklist[access] and not is_crossing and not is_passable_lift_gate then
         result.barrier = true
       end
     else
-      local barrier = node:get_value_by_key("barrier")
       if barrier and "" ~= barrier then
         if profile.barrier_blacklist[barrier] then
           result.barrier = true
@@ -430,7 +467,26 @@ function BikeCommon.make_profile(cfg)
     end
 
     -- check if node is a traffic light
-    result.traffic_lights = TrafficSignal.get_value(node)
+    local is_signal = TrafficSignal.get_value(node)
+    -- Signalized pedestrian/bicycle crossings use modern tagging: the node is
+    -- highway=crossing with crossing=traffic_signals (or crossing:signals=yes),
+    -- NOT highway=traffic_signals, so TrafficSignal.get_value misses them and they
+    -- cost nothing. A cyclist still waits at the red, so a big-road corridor with
+    -- many such crossings was undercounted and routes freely zig-zagged across
+    -- major roads. Treat a signalized crossing like a traffic light so the route
+    -- prefers corridors with fewer of them. GRAVEL ONLY -- the heavily-tuned road
+    -- profile has many UK distance tests calibrated to the old (no-crossing-penalty)
+    -- behaviour, so keep it byte-for-byte unchanged there.
+    -- (result.traffic_lights is a write-only sol property, so build the value in a
+    -- local and assign once.)
+    if cfg.profile == "gravel" and not is_signal and is_crossing then
+      local crossing = node:get_value_by_key("crossing")
+      local crossing_signals = node:get_value_by_key("crossing:signals")
+      if crossing == "traffic_signals" or crossing_signals == "yes" then
+        is_signal = true
+      end
+    end
+    result.traffic_lights = is_signal
   end
 
   -- Country-specific speed limits from https://wiki.openstreetmap.org/wiki/Key:maxspeed
@@ -707,10 +763,22 @@ function BikeCommon.make_profile(cfg)
     local expressway = way:get_value_by_key("expressway")
 
     local speed = profile.bicycle_speeds[data.highway] or 0
+    -- Gravel: a track/path carrying an explicit tracktype grade is a real farm/forest doubletrack that
+    -- gravel bikes ride at full speed even when it is surfaced paved (e.g. an asphalt grade1 field road,
+    -- OSM way 95239327). Ride it at its TRACKTYPE speed (grade1-4 = GRAVEL_SPEED, grade5 = MEDIUM_SPEED)
+    -- instead of clamping to the ~10 km/h asphalt-connector speed -- the paved surface is incidental on a
+    -- proper track. Only track/path (not roads), only when a tracktype grade is present. Guarded below so
+    -- the path->default_speed reset and the surface clamp don't undo it.
+    local is_gravel_paved_track = cfg.profile == "gravel"
+        and (data.highway == "track" or data.highway == "path")
+        and tracktype and profile.tracktype_speeds[tracktype]
+        and surface and paved_surfaces[surface]
     if tracktype and profile.tracktype_speeds[tracktype] then -- https://www.openstreetmap.org/way/25317803
         local good_surface = surface ~= nil and is_road_surface(surface)
         local good_smoothness = data.smoothness == "excellent" or data.smoothness == "good"
-        if good_surface then
+        if is_gravel_paved_track then
+          speed = profile.tracktype_speeds[tracktype]
+        elseif good_surface then
           -- surface speed; an allowed-but-unlisted surface (gravel profile's permissive
           -- is_allowed_surface) falls back to default_speed. Explicit 0 entries are preserved.
           -- For the road profile every allowed surface is present in surface_speeds, so this
@@ -734,11 +802,13 @@ function BikeCommon.make_profile(cfg)
           speed = profile.tracktype_speeds[tracktype]
         end
     end
-    if (data.highway == "path" and is_road_surface(surface)) then -- https://www.openstreetmap.org/way/1163443297
+    if (data.highway == "path" and is_road_surface(surface)) and not is_gravel_paved_track then -- https://www.openstreetmap.org/way/1163443297
       speed = profile.default_speed
     end
-    -- it always decrease cycleway speeds
-    if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
+    -- it always decrease cycleway speeds (but a gravel paved track/path with a tracktype keeps its
+    -- tracktype speed -- the surface clamp would otherwise drag it back to the paved connector speed)
+    if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed)
+        and not is_gravel_paved_track then
       speed = profile.surface_speeds[surface]
     end
     -- Gravel: a known gravel-preferred surface SETS the speed (promotes up), not just caps it.
@@ -766,7 +836,13 @@ function BikeCommon.make_profile(cfg)
         -- are held down here. A footway/path tagged bicycle=designated is real cycle infra, handled separately.
         and not ((data.highway == "footway" or data.highway == "pedestrian" or data.highway == "steps")
                  and data.foot == "designated" and data.bicycle ~= "designated")
-        and profile.surface_speeds[surface] and profile.surface_speeds[surface] > speed then
+        -- Only PREFERRED (unpaved) surfaces promote. A paved surface (asphalt/concrete/paving_stones =
+        -- default_speed) must never RAISE a deliberately-lowered highway base (e.g. tertiary =
+        -- default_speed/3): gravel takes the MIN of base and paved-surface speed there, so a discouraged
+        -- asphalt through-road stays slow and quieter streets win. Preferred surfaces (> default_speed)
+        -- still promote so surface=gravel/dirt beats asphalt.
+        and profile.surface_speeds[surface] and profile.surface_speeds[surface] > speed
+        and profile.surface_speeds[surface] > profile.default_speed then
       speed = profile.surface_speeds[surface]
     end
     if data.mtb_scale and tonumber(data.mtb_scale) then
@@ -839,12 +915,25 @@ function BikeCommon.make_profile(cfg)
         result.backward_speed = speed
       end
     elseif (data.highway == "unclassified" and (((data.maxspeed >= 40 and data.maxspeed < 100) and not surface) or is_road_surface(surface))) then
-      result.forward_speed = profile.surface_speeds[surface] or speed
-      result.backward_speed = profile.surface_speeds[surface] or speed
+      -- allowed-but-unlisted surface (gravel) -> fall back to the highway speed (0 is preserved: truthy in Lua)
+      local road_speed = profile.surface_speeds[surface] or speed
+      -- Gravel takes the MIN of the paved-surface speed and the (possibly deliberately-lowered) highway
+      -- base, so a discouraged asphalt through-road stays slow instead of the asphalt surface raising it
+      -- back to default_speed. Road profile keeps the surface speed (unchanged).
+      if cfg.profile == "gravel" then road_speed = math.min(road_speed, speed) end
+      result.forward_speed = road_speed
+      result.backward_speed = road_speed
     elseif (data.highway == "service" or data.highway == "tertiary") and (is_road_surface(surface)) then
       -- allowed-but-unlisted surface (gravel) -> fall back to the highway speed (0 is preserved: truthy in Lua)
-      result.forward_speed = profile.surface_speeds[surface] or speed
-      result.backward_speed = profile.surface_speeds[surface] or speed
+      local road_speed = profile.surface_speeds[surface] or speed
+      -- Gravel takes the MIN of the paved-surface speed and the (possibly deliberately-lowered) highway
+      -- base: a discouraged asphalt tertiary (default_speed/3) must stay slow instead of the asphalt
+      -- surface restoring it to default_speed, so quieter service/living streets win. Road unchanged.
+      if cfg.profile == "gravel" then
+          road_speed = math.min(road_speed, speed)
+      end
+      result.forward_speed = road_speed
+      result.backward_speed = road_speed
     elseif isBridgePassable(data) then
       if not data.highway or data.highway == '' then
         result.forward_speed = 0
@@ -916,22 +1005,88 @@ function BikeCommon.make_profile(cfg)
       result.forward_speed = 5
       result.backward_speed = 5
       data.way_type_allows_pushing = true
+    elseif (data.highway == "footway" or data.highway == "path")
+        and data.segregated == "yes" and data.cycleway_surface and data.bicycle ~= "no" and cfg.profile == "gravel" then
+      -- https://www.openstreetmap.org/way/1421693779 — a segregated foot+cycle way (segregated=yes +
+      -- cycleway:surface set, cyclists not forbidden) that OSM maps as highway=footway, often
+      -- footway=crossing. This is genuine cycle infra: the cycle lane mapped onto the footway object, NOT a
+      -- pedestrian sidewalk. It must NOT be crushed to the paved-footway VERY_LOW (0.5 km/h), which forced
+      -- OSRM to detour around a short crossing. Speed mirrors the segregated designated-path branch below:
+      -- on gravel a paved cycleway stays a plain default_speed connector (boost_cycle_surface false for
+      -- paved), on road a paved cycleway is boosted x2. Uses the cycleway:surface when present.
+      local cycle_surface = data.cycleway_surface or surface
+      local base_speed = profile.surface_speeds[cycle_surface] or profile.default_speed
+      if boost_cycle_surface(cycle_surface) then
+        base_speed = base_speed * 2
+      end
+      result.forward_speed = base_speed
+      result.backward_speed = base_speed
+      data.way_type_allows_pushing = true
+    elseif cfg.profile == "gravel" and data.highway == "pedestrian"
+        and surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] > profile.default_speed then
+      -- Pedestrian way (plaza / promenade / pedestrian street) with a mapped GOOD gravel surface
+      -- (compacted/gravel/dirt): rideable, but pedestrian ways are pedestrian-PRIORITY, so cap at
+      -- medium_speed — below a footway_unpaved gravel path, and below a real gravel road. A pedestrian
+      -- way with NO surface tag or a paved surface is NOT promoted here (falls through to the walking/push
+      -- fallback), so a mapped-surface pedestrian way is always preferred over a no-info one. Fixes ways
+      -- 452988446 / 481169080 (pedestrian compacted) that used to collapse to walking speed (~3 km/h)
+      -- because `pedestrian` is not in bicycle_speeds. math.min preserves any mtb:scale/smoothness penalty.
+      local ped_speed = math.min(speed, cfg.medium_speed)
+      result.forward_speed = ped_speed
+      result.backward_speed = ped_speed
+      data.way_type_allows_pushing = true
     elseif cfg.profile == "gravel" and data.highway == "footway" then
-      -- Footway handling for gravel. A PAVED/pedestrian footway (sidewalk, asphalt, concrete, paving_stones,
-      -- untagged) is pedestrian infra running alongside a road: force it to the footway base speed
-      -- (gravel.lua footway = VERY_LOW_SPEED) so the road wins (way 164030241 sidewalk, way 736861895
-      -- asphalt footway). But a GRAVEL-surfaced footway (surface promoted above default_speed) is a real
-      -- gravel path that recorded gravel rides use — keep its promoted speed. De-promoting ALL footways
-      -- (incl. gravel ones) pushed SA routes onto a dangerous no-safe-heatmap climb (Limassol safety test,
-      -- 5/6 fail) and broke coverage legs on surface=gravel footways; keeping gravel footways fixes both.
+      -- Footway handling for gravel. Three tiers, so a KNOWN surface is ALWAYS preferred over a footway
+      -- with no surface info:
+      --   * KNOWN unpaved surface (compacted/gravel/dirt, promoted above default_speed): ride at
+      --     footway_unpaved_speed — well above asphalt, just below a real gravel road. e.g. way 31397951.
+      --   * NO surface tag (and not a tagged sidewalk): rideable but UNKNOWN, so ride at medium_speed,
+      --     strictly BELOW a known unpaved surface — a way whose surface is actually mapped always wins
+      --     the tie. Park & greenway footways are routinely left untagged, so we still ride them (not
+      --     VERY_LOW), just lower.
+      --   * PAVED (sidewalk / asphalt / concrete / paving_stones): pedestrian infra alongside a road,
+      --     kept at the footway base (VERY_LOW) so the road wins (way 164030241 sidewalk, way 736861895).
+      -- De-promoting ALL footways (incl. gravel ones) pushed SA routes onto a dangerous no-safe-heatmap
+      -- climb (Limassol safety test) and broke coverage legs on surface=gravel footways; the tiers fix both.
       -- bicycle=designated / permissive are handled by the branches above and never reach here.
       local surf_speed = surface and profile.surface_speeds[surface]
       if surf_speed and surf_speed > profile.default_speed then
-        result.forward_speed = speed
-        result.backward_speed = speed
+        -- known unpaved surface: cap the promoted speed at footway_unpaved_speed (footway/pedestrian is
+        -- narrow pedestrian infra, so a touch below a real gravel road). math.min preserves any mtb:scale
+        -- / smoothness penalty already applied to `speed`.
+        local footway_speed = math.min(speed, cfg.footway_unpaved_speed or cfg.medium_speed)
+        result.forward_speed = footway_speed
+        result.backward_speed = footway_speed
+      elseif surface == nil and data.footway ~= "sidewalk" then
+        -- no surface info: rideable but strictly below a known unpaved surface (medium_speed <
+        -- footway_unpaved_speed). Never fully block a footway (you can dismount and push), so a
+        -- hard-blocked (mtb:scale>=3, speed==0) way floors at VERY_LOW_SPEED rather than 0.
+        local footway_speed = cfg.medium_speed
+        if speed == 0 then
+          footway_speed = VERY_LOW_SPEED
+        end
+        result.forward_speed = footway_speed
+        result.backward_speed = footway_speed
+      elseif data.footway == "crossing" then
+        -- A road crossing (footway=crossing) is a SHORT (typically < 30 m) unavoidable link between cycle
+        -- or road segments at a junction, NOT a ridable corridor. Crushing a paved crossing to VERY_LOW
+        -- (0.5 km/h) imposes a ~200 s penalty for a ~27 m crossing, which forces long detours around the
+        -- junction — e.g. way 1148347960 (paving_stones crossing) between cycleways 1263670608 and
+        -- 1148349365, which pushed the route onto a ~490 m loop. Give crossings medium_speed so they stop
+        -- being a barrier; a crossing can't form a path, so this never makes footways attractive to ride
+        -- along (plain paved footways/sidewalks below stay VERY_LOW). A hard-blocked way (mtb:scale>=3,
+        -- speed==0) still floors at VERY_LOW rather than being promoted.
+        local crossing_speed = cfg.medium_speed
+        if speed == 0 then
+          crossing_speed = VERY_LOW_SPEED
+        end
+        result.forward_speed = crossing_speed
+        result.backward_speed = crossing_speed
       else
-        result.forward_speed = profile.bicycle_speeds[data.highway]
-        result.backward_speed = profile.bicycle_speeds[data.highway]
+        -- paved footway/pedestrian or a tagged sidewalk: keep VERY_LOW so the parallel road wins.
+        local paved_speed = profile.bicycle_speeds[data.highway] or VERY_LOW_SPEED
+        result.forward_speed = paved_speed
+        result.backward_speed = paved_speed
       end
       data.way_type_allows_pushing = true
     elseif data.cycleway == "sidewalk" and data.foot == "yes" then
@@ -982,8 +1137,12 @@ function BikeCommon.make_profile(cfg)
     -- so it's preferred over paved connectors, but below a known-good gravel surface (GRAVEL_SPEED) and
     -- not above a known rough surface — explicit tagging always wins. Heatmap popularity then breaks ties.
     -- (Without this they kept default_speed = asphalt, so a paved road of equal length always won.)
+    -- bicycle=designated is EXCLUDED: a designated cycle path is not "unknown" — the dedicated-cycle-infra
+    -- branch above already gave it the unpaved x2 boost (via boost_cycle_surface), and capping it to
+    -- medium_speed here would throw that away, leaving a proven Radweg no faster than a bare track.
     if cfg.profile == "gravel"
         and (data.highway == "track" or data.highway == "path" or data.highway == "bridleway")
+        and data.bicycle ~= "designated"
         and not surface and not tracktype and not data.smoothness and not data.mtb_scale then
       if result.forward_mode ~= mode.inaccessible and result.forward_speed and result.forward_speed > 0 then
         result.forward_speed = cfg.medium_speed
@@ -1420,6 +1579,13 @@ function BikeCommon.make_profile(cfg)
       implied_oneway = false
     }
 
+    -- Gravel: an unpaved way still tagged highway=construction but surveyed >=3 months ago is treated as a
+    -- finished, rideable gravel track. Rewrite the highway type BEFORE the handler sequence so blocked_ways
+    -- no longer drops it and surface=compacted/gravel earns GRAVEL_SPEED like any other track.
+    if construction_ride_allowed(way, data) then
+      data.highway = "track"
+    end
+
     local handlers = Sequence {
       -- set the default mode for this profile. if can be changed later
       -- in case it turns we're e.g. on a ferry
@@ -1468,29 +1634,61 @@ function BikeCommon.make_profile(cfg)
       if data.highway == "cycleway" then
         is_good_cycling_infrastructure = true
       elseif (data.highway == "track" or data.highway == "residential") and data.surface and is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/340134972 https://www.openstreetmap.org/way/100520383
-        is_good_cycling_infrastructure = true
+        if cfg.profile == "gravel" then
+          -- Gravel: a cycle-network track/residential is "good infrastructure" ONLY if it is UNPAVED --
+          -- a good gravel road proven by the signed route, which we gently prefer (see the gravel branch
+          -- in the boost block below). A PAVED one must NOT be boosted: the min(default_speed, speed)*2.5-2.8
+          -- formula would lift it to ~26 km/h (near GRAVEL_SPEED 30) purely for lying on an rcn/lcn route,
+          -- so the parallel gravel lost to the asphalt Radweg on Leipzig routes 2/3 (Störmthaler/Kulkwitzer/
+          -- Zwenkauer). `is_road_surface` is ~"anything but mud" on gravel, so we gate on the explicit
+          -- paved-surface set instead. Road profile is unchanged (else branch).
+          is_good_cycling_infrastructure = not paved_surfaces[data.surface]
+        else
+          is_good_cycling_infrastructure = true
+        end
       end
 
       if is_good_cycling_infrastructure then
         local speed_boost = get_cycle_network_speed_boost(way, relations, profile)
         if speed_boost > 1.0 then
-          local forward_speed = profile.default_speed
-          local backward_speed = profile.default_speed
-
-          if (result.forward_speed < forward_speed) then
-            forward_speed = result.forward_speed
-          end
-          if (result.backward_speed < backward_speed) then
-            backward_speed = result.backward_speed
-          end
-          if forward_speed > 0 then
-            result.forward_speed = forward_speed * speed_boost
-            result.backward_speed = backward_speed * speed_boost
+          if cfg.profile == "gravel" then
+            -- Gravel: gently prefer an UNPAVED gravel road that carries a signed cycle route over unsigned
+            -- gravel (a network-tagged gravel road is proven good). Only UNPAVED ways are boosted: the
+            -- track/residential branch above already gated to unpaved, but a network CYCLEWAY reaches here
+            -- regardless of surface, so re-check -- a paved cycleway keeps its base speed (a paved connector
+            -- is never boosted to gravel-parity). The road formula min(default_speed, speed)*2.5-2.8 is
+            -- wrong here anyway -- it would DOWNGRADE 30 km/h gravel to min(10,30)*2.6 = 26. Instead apply a
+            -- small tiered bonus to the gravel's OWN speed (lcn +10% .. icn +40%), capped so it can't run
+            -- away and cause detours.
+            if not (data.surface and paved_surfaces[data.surface]) then
+              local gravel_bonus = 1.10 + (speed_boost - 2.5)   -- lcn 1.10 / rcn 1.20 / ncn 1.30 / icn 1.40
+              local cap = cfg.default_speed * 4                 -- 40 km/h ceiling
+              if result.forward_speed > 0 then
+                result.forward_speed = math.min(result.forward_speed * gravel_bonus, cap)
+              end
+              if result.backward_speed > 0 then
+                result.backward_speed = math.min(result.backward_speed * gravel_bonus, cap)
+              end
+            end
           else
-            result.forward_speed = 5
-            result.backward_speed = 5
-            result.forward_mode = mode.cycling
-            result.backward_mode = mode.cycling
+            local forward_speed = profile.default_speed
+            local backward_speed = profile.default_speed
+
+            if (result.forward_speed < forward_speed) then
+              forward_speed = result.forward_speed
+            end
+            if (result.backward_speed < backward_speed) then
+              backward_speed = result.backward_speed
+            end
+            if forward_speed > 0 then
+              result.forward_speed = forward_speed * speed_boost
+              result.backward_speed = backward_speed * speed_boost
+            else
+              result.forward_speed = 5
+              result.backward_speed = 5
+              result.forward_mode = mode.cycling
+              result.backward_mode = mode.cycling
+            end
           end
         end
       end
@@ -1524,6 +1722,26 @@ function BikeCommon.make_profile(cfg)
         if is_calm then
           result.highway_turn_classification = 3
         end
+      end
+    end
+
+    -- Gravel: mark genuinely UNPAVED ways with a dedicated turn class (5) so process_turn can make
+    -- gravel<->gravel turns nearly free. A winding forest/doubletrack line otherwise pays ~30 s per fork
+    -- (MAX_TURN_PENALTY for fast edges) and loses to a straight paved road even when the gravel itself is
+    -- faster per metre -- exactly the Leipzig route-4 south-forest case. This is the "prefer gravel over
+    -- paved in general" tilt done on the gravel side (we do NOT touch the paved bicycle=designated boost,
+    -- which is good cycle infra). "Unpaved" = a non-paved surface on ANY highway type (surface=gravel/
+    -- dirt/ground/compacted/... on a track, road, unclassified, service, ...), OR a bare
+    -- track/path/bridleway with no surface tag (unknown = gravel on this profile). A PAVED surface
+    -- (asphalt/paved/concrete/paving_stones) is left unmarked so it keeps normal turn costs; the road
+    -- profile is untouched.
+    if cfg.profile == "gravel" then
+      local surface = data.surface
+      local is_unpaved_surface = surface and not paved_surfaces[surface]
+      local is_bare_gravel_way = not surface
+          and (data.highway == "track" or data.highway == "path" or data.highway == "bridleway")
+      if is_unpaved_surface or is_bare_gravel_way then
+        result.highway_turn_classification = 5
       end
     end
 
@@ -1672,6 +1890,16 @@ function BikeCommon.make_profile(cfg)
     -- making OSRM overshoot 1.1km past the destination instead of using the ring).
     if turn.source_highway_turn_classification == 4 and turn.target_highway_turn_classification == 4 then
       turn.duration = math.min(turn.duration, 5)
+    end
+
+    -- Gravel: a turn between two UNPAVED ways (class 5: gravel/dirt/ground surfaces, or bare gravel
+    -- tracks -- forest/field forks) is trivial riding, not a real junction. Make it nearly free so a
+    -- twisty gravel line is not turn-taxed out of contention against a straight paved road -- the general
+    -- "prefer gravel over paved" goal, achieved on the gravel side without nerfing paved cycle infra.
+    if cfg.profile == "gravel"
+        and turn.source_highway_turn_classification == 5
+        and turn.target_highway_turn_classification == 5 then
+      turn.duration = math.min(turn.duration, 4)
     end
 
   --   if profile.properties.weight_name == 'cyclability' then
