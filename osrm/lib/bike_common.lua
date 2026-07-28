@@ -942,10 +942,19 @@ function BikeCommon.make_profile(cfg)
         result.forward_speed = 16
         result.backward_speed = 16
       elseif (data.highway == "footway") then
-        -- https://www.openstreetmap.org/way/352605114 - shouldn't use because we have road
-        -- https://www.openstreetmap.org/way/42965975 - should use - the only way
-        result.forward_speed = LOW_SPEED
-        result.backward_speed = LOW_SPEED
+        -- Pedestrian footbridge (highway=footway, bridge=yes, no bicycle=designated). VERY_LOW_SPEED
+        -- makes it a last resort WITHOUT blocking it, so the outcome is decided by whether an
+        -- alternative exists, which is exactly what we want:
+        --   * has a parallel road/path  -> the alternative wins, the footbridge is avoided.
+        --     e.g. the Girona/Onyar bridges (ways 61945564 / 61946652 / 61946755, riverbank roads
+        --     ~30 m away) -> OsrmRoutingSpainTest. Surface does NOT discriminate here: Peixateries
+        --     Velles (61946755) is surface=wood yet must be avoided, so we can't gate on paved-ness.
+        --   * genuinely the only crossing -> no cheaper route exists, so OSRM still rides it.
+        --     e.g. https://www.openstreetmap.org/way/42965975 (surface=wood, the only way).
+        -- LOW_SPEED here made the footbridge attractive enough to ride even when a road existed, which
+        -- broke the Onyar avoidance. https://www.openstreetmap.org/way/352605114 (has a road) -> avoided.
+        result.forward_speed = VERY_LOW_SPEED
+        result.backward_speed = VERY_LOW_SPEED
       else
         result.forward_speed = 16
         result.backward_speed = 16
