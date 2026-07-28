@@ -6,12 +6,24 @@ set -x
 # $1 (required): part1, part2, or both
 # $2 (required): mld or ch - which OSRM algorithm to build
 # $3 (optional): full - when provided, download files and run osmium + ModifyOsmWays
+# --profile road|gravel (required, may appear anywhere): which bike profile to build
 
-if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: $0 <part1|part2|both> <mld|ch> [full]"
+PROFILE=""
+POSITIONAL=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --profile) PROFILE="$2"; shift; shift ;; # two shifts, not `shift 2`: a bare trailing --profile would loop forever
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+set -- "${POSITIONAL[@]}"
+
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$PROFILE" ]; then
+    echo "Usage: $0 <part1|part2|both> <mld|ch> [full] --profile <road|gravel>"
     echo "  part1|part2|both - which parts to process (required)"
     echo "  mld|ch - OSRM algorithm: mld (partition+customize) or ch (contract) (required)"
     echo "  full - download files and run osmium + ModifyOsmWays (optional)"
+    echo "  --profile road|gravel - bike profile to build (required)"
     exit 1
 fi
 
@@ -31,6 +43,30 @@ fi
 
 if [ -n "$FULL_MODE" ] && [ "$FULL_MODE" != "full" ]; then
     echo "Error: third argument must be 'full' or empty"
+    exit 1
+fi
+
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
+    echo "Error: --profile must be 'road' or 'gravel'"
+    exit 1
+fi
+
+# Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
+# gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.
+if [ "$PROFILE" = "gravel" ]; then
+    LUA_FILE="gravel.lua"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
+    ROUTED_PORT=8004
+else
+    LUA_FILE="bicycle.lua"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
+    ROUTED_PORT=8003
+fi
+echo "Building split graph: profile=$PROFILE lua=$LUA_FILE traffic=$TRAFFIC_CSV port=$ROUTED_PORT"
+
+# Checked up front: extract/partition take hours, no point starting without the speed file.
+if [ ! -f "$TRAFFIC_CSV" ]; then
+    echo "ERROR: traffic CSV not found: $TRAFFIC_CSV"
     exit 1
 fi
 
@@ -69,9 +105,9 @@ mkdir -p ~/disk
 
 START_TIME=$(date +%s)
 DATE=$(date +%d.%m.%Y)
-BASE_DIR=~/disk/osrm_${DATE}_${ALGORITHM}
+BASE_DIR=~/disk/osrm_${DATE}_${ALGORITHM}_${PROFILE}
 date
-telegram-send "Started osrm split build $PART $ALGORITHM $(hostname)"
+telegram-send "Started osrm split build $PART $ALGORITHM $PROFILE $(hostname)"
 cd ~/disk
 
 # Build OSRM backend if needed
@@ -97,12 +133,12 @@ cp -r ~/data/AutoRouteServices/osrm "$BASE_DIR/osrm_scripts" # for history - to 
 
 if [ "$DO_PART1" = true ]; then
     mkdir -p "$BASE_DIR/part1"
-    cp ~/data/AutoRouteServices/osrm/bicycle.lua "$BASE_DIR/part1/"
+    cp ~/data/AutoRouteServices/osrm/${LUA_FILE} "$BASE_DIR/part1/"
 fi
 
 if [ "$DO_PART2" = true ]; then
     mkdir -p "$BASE_DIR/part2"
-    cp ~/data/AutoRouteServices/osrm/bicycle.lua "$BASE_DIR/part2/"
+    cp ~/data/AutoRouteServices/osrm/${LUA_FILE} "$BASE_DIR/part2/"
 fi
 
 # Download and process PBF files only in full mode
@@ -123,12 +159,12 @@ if [ "$FULL_MODE" = "full" ]; then
 
     if [ "$DO_PART1" = true ]; then
         echo "Downloading Part 1 regions..."
-#        wget -N https://download.geofabrik.de/europe-latest.osm.pbf
-#        wget -N https://download.geofabrik.de/asia-latest.osm.pbf
-#        wget -N https://download.geofabrik.de/africa-latest.osm.pbf
+        wget -N https://download.geofabrik.de/europe-latest.osm.pbf
+        wget -N https://download.geofabrik.de/asia-latest.osm.pbf
+        wget -N https://download.geofabrik.de/africa-latest.osm.pbf
 
         echo "Merging Part 1 regions..."
-#        osmium merge --overwrite europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf -o ~/disk/planet-part1.osm.pbf || { echo "osmium merge part1 failed"; telegram-send "osmium merge part1 failed $(hostname)"; exit 1; }
+        osmium merge --overwrite europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf -o ~/disk/planet-part1.osm.pbf || { echo "osmium merge part1 failed"; telegram-send "osmium merge part1 failed $(hostname)"; exit 1; }
         check_pbf_size ~/disk/planet-part1.osm.pbf 50
         cd ~/disk/AutoRoute
         MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part1.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part1 failed $(hostname)"; exit 1; }
@@ -138,9 +174,9 @@ if [ "$FULL_MODE" = "full" ]; then
     if [ "$DO_PART2" = true ]; then
         cd ~/disk
         echo "Downloading Part 2 regions..."
-#        wget -N https://download.geofabrik.de/north-america-latest.osm.pbf
-#        wget -N https://download.geofabrik.de/south-america-latest.osm.pbf
-#        wget -N https://download.geofabrik.de/australia-oceania-latest.osm.pbf
+        wget -N https://download.geofabrik.de/north-america-latest.osm.pbf
+        wget -N https://download.geofabrik.de/south-america-latest.osm.pbf
+        wget -N https://download.geofabrik.de/australia-oceania-latest.osm.pbf
 
         echo "Merging Part 2 regions..."
         osmium merge --overwrite north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf -o ~/disk/planet-part2.osm.pbf || { echo "osmium merge part2 failed"; telegram-send "osmium merge part2 failed $(hostname)"; exit 1; }
@@ -164,26 +200,28 @@ process_part() {
     echo "Setting up Part ${part_num}..."
     cd "$part_dir"
     cp -r ~/disk/osrm-backend/profiles/lib/ .
+    # bicycle.lua/gravel.lua are thin shims that require('lib/bike_common'); stock OSRM lib lacks it.
+    cp ~/data/AutoRouteServices/osrm/lib/bike_common.lua lib/
     cp ~/disk/osrm-backend/data/driving_side.geojson .
     ln -s ~/disk/${pbf_file} ./${pbf_file}
 
     echo "Extracting Part ${part_num}..."
-    ~/disk/osrm-backend/build/osrm-extract -t $(nproc) --location-dependent-data driving_side.geojson -p bicycle.lua ${pbf_file} || { echo "osrm-extract part${part_num} failed"; telegram-send "osrm-extract part${part_num} failed $(hostname)"; exit 1; }
+    ~/disk/osrm-backend/build/osrm-extract -t $(nproc) --location-dependent-data driving_side.geojson -p ${LUA_FILE} ${pbf_file} || { echo "osrm-extract part${part_num} failed"; telegram-send "osrm-extract part${part_num} failed $(hostname)"; exit 1; }
     #telegram-send "Part ${part_num} extract finished $(hostname)"
 
     if [ "$ALGORITHM" = "mld" ]; then
         ~/disk/osrm-backend/build/osrm-partition -t $(nproc) ${osrm_file} || { echo "osrm-partition part${part_num} failed"; telegram-send "osrm-partition part${part_num} failed $(hostname)"; exit 1; }
         #telegram-send "Part ${part_num} partition finished $(hostname)"
-        CUSTOMIZE_ARGS="--segment-speed-file ~/disk/traffic_dumps/traffic_final_road.csv"
-#        if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
-#            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file ~/disk/traffic_dumps/traffic_final_turns.csv"
+        CUSTOMIZE_ARGS="--segment-speed-file $TRAFFIC_CSV"
+#        if [ -f $HOME/disk/traffic_dumps/traffic_final_turns.csv ]; then
+#            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
 #        fi
         ~/disk/osrm-backend/build/osrm-customize -t $(nproc) ${osrm_file} $CUSTOMIZE_ARGS || { echo "osrm-customize part${part_num} failed"; telegram-send "osrm-customize part${part_num} failed $(hostname)"; exit 1; }
     else
-        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file ~/disk/traffic_dumps/traffic_final_road.csv || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
+        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file "$TRAFFIC_CSV" || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
     fi
     rm *.osrm.ebg *.osrm.cnbg *.osrm.cnbg_to_ebg *.osrm.enw *.osrm.turn_penalties_index *.osrm.restrictions
-    telegram-send "Part ${part_num} $ALGORITHM finished $(hostname)"
+    telegram-send "Part ${part_num} $ALGORITHM $PROFILE finished $(hostname)"
 }
 
 if [ "$DO_PART1" = true ]; then
@@ -231,8 +269,8 @@ start_server() {
 }
 
 if [ "$DO_PART1" = true ]; then
-    start_server 1 8003 160G
+    start_server 1 ${ROUTED_PORT} 160G
 fi
 if [ "$DO_PART2" = true ]; then
-    start_server 2 8003 70G
+    start_server 2 ${ROUTED_PORT} 70G
 fi

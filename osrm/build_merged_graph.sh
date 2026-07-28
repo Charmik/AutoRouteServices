@@ -11,17 +11,24 @@ fi
 
 HOSTNAME=$(hostname)
 
-# Parse args: `full` triggers download+merge; `--profile road|gravel` selects the bike profile.
-# Both are optional and may appear in any order (default: non-full, road).
-PROFILE="road"
+# Parse args: `full` (optional) triggers download+merge; `--profile road|gravel` (required)
+# selects the bike profile. They may appear in any order.
+PROFILE=""
 MODE=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --profile) PROFILE="$2"; shift 2 ;;
+        --profile) PROFILE="$2"; shift; shift ;; # two shifts, not `shift 2`: a bare trailing --profile would loop forever
         full) MODE="full"; shift ;;
         *) echo "Unknown argument: $1"; shift ;;
     esac
 done
+
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
+    echo "Usage: $0 [full] --profile <road|gravel>"
+    echo "  full - download regions and merge them (optional)"
+    echo "  --profile road|gravel - bike profile to build (required)"
+    exit 1
+fi
 
 # Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
 # gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.

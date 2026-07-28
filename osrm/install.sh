@@ -15,14 +15,14 @@ sudo apt install -y gpg wget
 wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
 echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/kitware.list
 sudo apt update
-sudo apt install cmake
+sudo apt install -y cmake
 
 sudo apt install software-properties-common
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
 sudo apt update
-sudo apt install gcc-11 g++-11
+sudo apt install -y gcc-11 g++-11
 
-sudo apt install python3-pip
+sudo apt install -y python3-pip
 pip3 install --break-system-packages aiohttp
 
 
