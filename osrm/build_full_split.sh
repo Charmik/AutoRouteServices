@@ -8,6 +8,18 @@ set -x
 # $3 (optional): full - when provided, download files and run osmium + ModifyOsmWays
 # --profile road|gravel (required, may appear anywhere): which bike profile to build
 
+#sudo swapoff -a
+#rm -f swap
+#sudo fallocate -l 750G swap # 256RAM + 440 is not enough for extract
+#sudo chmod 600 swap
+#sudo mkswap swap
+#sudo swapon swap
+#echo '/home/remote1/disk/swap none swap sw 0 0' | sudo tee -a /etc/fstab
+#sudo swapon -p 32767 swap
+#sudo swapon -p 1 swap
+#sudo systemctl stop systemd-oomd
+#sudo systemctl stop systemd-oomd.socket
+
 PROFILE=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do

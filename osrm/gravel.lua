@@ -6,7 +6,7 @@
 -- allowed-surface gate differ.
 --
 -- Speed model: OSRM weights by duration, so higher speed = preferred route.
--- GRAVEL_SPEED (30) >> default_speed (15) = gravel surfaces strongly preferred over asphalt.
+-- GRAVEL_SPEED (45) >> default_speed (10) = gravel surfaces strongly preferred over asphalt.
 -- Bare track/path ride at default_speed; a track+surface=gravel rides at GRAVEL_SPEED.
 
 api_version = 4
@@ -14,18 +14,31 @@ api_version = 4
 local BikeCommon = require('lib/bike_common')
 
 local default_speed  = 10   -- asphalt/connector baseline; lower than road's 25 so paved = connector, not preferred
-local GRAVEL_SPEED   = 30   -- preferred gravel surfaces; clearly faster than asphalt → strongly preferred
-local MEDIUM_SPEED   = 11   -- rough-but-rideable gravel (sand/grade5/rough smoothness): just ABOVE asphalt
-                            -- so OSRM follows recorded gravel rides instead of detouring via faster paved roads,
-                            -- yet still below good gravel (30). LOW_SPEED stays punitive for genuinely-avoid cases
-                            -- (expressway/NHS/cobblestone) so "avoid traffic" is preserved.
+local GRAVEL_SPEED1   = 50   -- preferred gravel surfaces; clearly faster than asphalt AND paved tracks (15) so
+                            -- real gravel is strongly preferred even at a detour. At 45 vs a paved track's 15
+                            -- (3x), a gravel road wins over a parallel asphalt track within ~20% extra distance
+                            -- (Leipzig way 1246026219 vs asphalt track 23547831) — see PAVED_TRACK_SPEED below.
+local GRAVEL_SPEED2   = 40  -- second highest priority - roads which we still want to prefer but to lose to GRAVEL_SPEED1
+local MEDIUM_SPEED   = 10   -- rough-but-rideable gravel (sand/grade5/rough smoothness): kept at the asphalt
+                            -- base (NOT bumped with the rest of the gravel tier) — deep sand / grade5 is
+                            -- genuinely a last resort, worse than a smooth paved track, so it stays at ~10.
+                            -- LOW_SPEED stays punitive for genuinely-avoid cases (expressway/NHS/cobblestone).
 local LOW_SPEED      = 3
 local VERY_LOW_SPEED = 0.5
 local FOOTWAY_UNPAVED_SPEED = 20  -- unpaved footway (surface=compacted/gravel/dirt): rideable park/greenway
                                   -- path. Well above asphalt (default_speed) and a paved footway (VERY_LOW)
-                                  -- so it competes with a parallel gravel road, but a touch below a real
-                                  -- gravel road/track (GRAVEL_SPEED) — a footway is still narrow pedestrian
+                                  -- so it competes with a parallel gravel road, but clearly below a real
+                                  -- gravel road/track (GRAVEL_SPEED 40) — a footway is still narrow pedestrian
                                   -- infra. Paved footways stay VERY_LOW. Tunable; the dispatch caps here.
+local PAVED_TRACK_SPEED = 15  -- a PAVED track/path with a tracktype (e.g. asphalt grade1 field/riverside path,
+                              -- OSM ways 844496273 / 23547831): a usable connector — above the asphalt base
+                              -- (default_speed 10) — but clearly WORSE for a gravel bike than a real unpaved
+                              -- gravel road. Lowered 20->15 so the gravel/asphalt-track gap widens to 3x
+                              -- (45 vs 15): a parallel real-gravel road now out-weighs a shorter asphalt track
+                              -- even when the gravel is a ~17% detour (Leipzig way 1246026219 vs asphalt track
+                              -- 23547831). Before the ladder, is_gravel_paved_track gave it the full tracktype
+                              -- speed (30), tying the parallel gravel and letting the shorter asphalt win.
+                              -- Speed ladder: rough-gravel/asphalt 10 < paved-track 15 < footway 20 < gravel 45.
 
 local cfg = {
   profile = "gravel",
@@ -35,6 +48,7 @@ local cfg = {
   low_speed      = LOW_SPEED,
   very_low_speed = VERY_LOW_SPEED,
   footway_unpaved_speed = FOOTWAY_UNPAVED_SPEED,
+  paved_track_speed = PAVED_TRACK_SPEED,
 
   -- Gravel bikes do NOT prefer paved cycleways: no cycleway speed boost (road uses the default x2). A paved
   -- cycleway keeps its paved base speed (15), a connector below GRAVEL_SPEED (30), never rivalling gravel.
@@ -88,23 +102,23 @@ local cfg = {
   --   → assigned per the paved-family / discouraged rules in the spec.
   surface_speeds = {
     -- Preferred gravel surfaces (GRAVEL_SPEED >> asphalt → OSRM strongly prefers these)
-    gravel              = GRAVEL_SPEED,
-    fine_gravel         = GRAVEL_SPEED,
-    compacted           = GRAVEL_SPEED,
-    dirt                = GRAVEL_SPEED,
-    ground              = GRAVEL_SPEED,
-    earth               = GRAVEL_SPEED,
-    soil                = GRAVEL_SPEED,  -- synonym for earth (Java maps it to DIRT)
-    clay                = GRAVEL_SPEED,  -- firm when dry; a real unpaved gravel surface (Java maps it to DIRT)
-    rock                = GRAVEL_SPEED,  -- rocky doubletrack: rideable gravel/adventure surface
-    rocks               = GRAVEL_SPEED,
-    unpaved             = GRAVEL_SPEED,
-    laterite            = GRAVEL_SPEED,  -- lateritic-soil road/track: a real unpaved gravel surface
-    pebblestone         = GRAVEL_SPEED,
-    grass_paver         = GRAVEL_SPEED,
-    shells              = GRAVEL_SPEED,  -- crushed/whole seashells (NL cycleways): firm, gravel-friendly
-    chipseal            = GRAVEL_SPEED,  -- sealed but treated as compacted: good gravel surface
-    grass               = GRAVEL_SPEED,  -- grass tracks/field edges are ordinary gravel-bike terrain and are
+    gravel              = GRAVEL_SPEED2,
+    fine_gravel         = GRAVEL_SPEED2,
+    compacted           = GRAVEL_SPEED1,
+    dirt                = GRAVEL_SPEED2,
+    ground              = GRAVEL_SPEED2,
+    earth               = GRAVEL_SPEED2,
+    soil                = GRAVEL_SPEED2,  -- synonym for earth (Java maps it to DIRT)
+    clay                = GRAVEL_SPEED2,  -- firm when dry; a real unpaved gravel surface (Java maps it to DIRT)
+    rock                = GRAVEL_SPEED2,  -- rocky doubletrack: rideable gravel/adventure surface
+    rocks               = GRAVEL_SPEED2,
+    unpaved             = GRAVEL_SPEED2,
+    laterite            = GRAVEL_SPEED2,  -- lateritic-soil road/track: a real unpaved gravel surface
+    pebblestone         = GRAVEL_SPEED2,
+    grass_paver         = GRAVEL_SPEED2,
+    shells              = GRAVEL_SPEED2,  -- crushed/whole seashells (NL cycleways): firm, gravel-friendly
+    chipseal            = GRAVEL_SPEED2,  -- sealed but treated as compacted: good gravel surface
+    grass               = GRAVEL_SPEED2,  -- grass tracks/field edges are ordinary gravel-bike terrain and are
                                          -- ridden routinely; at MEDIUM_SPEED they capped their own grade4
                                          -- tracks back to 11 (see tracktype_speeds) and lost to asphalt
 
@@ -143,10 +157,10 @@ local cfg = {
   -- (horrible/impassable->0) and mtb:scale (>=2 LOW, >=3 forbidden), and a soft surface still caps the
   -- speed (a grade4 track tagged surface=sand/woodchips keeps MEDIUM_SPEED via the surface min).
   tracktype_speeds = {
-    grade1 = GRAVEL_SPEED,
-    grade2 = GRAVEL_SPEED,
-    grade3 = GRAVEL_SPEED,
-    grade4 = GRAVEL_SPEED,
+    grade1 = GRAVEL_SPEED1,
+    grade2 = GRAVEL_SPEED1,
+    grade3 = GRAVEL_SPEED1,
+    grade4 = GRAVEL_SPEED2,
     grade5 = MEDIUM_SPEED
   },
 
@@ -155,11 +169,11 @@ local cfg = {
   -- ridden gravel tracks like OSM way 711541590 a 3 km/h chokepoint and pushed routes onto parallel
   -- asphalt). "very_bad" and below stay slow: genuinely rough, walk-your-bike terrain.
   smoothness_speeds = {
-    excellent       = GRAVEL_SPEED,
-    good            = GRAVEL_SPEED,
-    very_good       = GRAVEL_SPEED,
-    intermediate    = GRAVEL_SPEED,
-    bad             = GRAVEL_SPEED,
+    excellent       = GRAVEL_SPEED1,
+    good            = GRAVEL_SPEED1,
+    very_good       = GRAVEL_SPEED1,
+    intermediate    = GRAVEL_SPEED1,
+    bad             = GRAVEL_SPEED2,
     very_bad        = LOW_SPEED,
     horrible        = VERY_LOW_SPEED,
     very_horrible   = VERY_LOW_SPEED,

@@ -763,12 +763,13 @@ function BikeCommon.make_profile(cfg)
     local expressway = way:get_value_by_key("expressway")
 
     local speed = profile.bicycle_speeds[data.highway] or 0
-    -- Gravel: a track/path carrying an explicit tracktype grade is a real farm/forest doubletrack that
-    -- gravel bikes ride at full speed even when it is surfaced paved (e.g. an asphalt grade1 field road,
-    -- OSM way 95239327). Ride it at its TRACKTYPE speed (grade1-4 = GRAVEL_SPEED, grade5 = MEDIUM_SPEED)
-    -- instead of clamping to the ~10 km/h asphalt-connector speed -- the paved surface is incidental on a
-    -- proper track. Only track/path (not roads), only when a tracktype grade is present. Guarded below so
-    -- the path->default_speed reset and the surface clamp don't undo it.
+    -- Gravel: a track/path carrying an explicit tracktype grade is a real farm/forest doubletrack (e.g. an
+    -- asphalt grade1 field road, OSM way 95239327), NOT a mere paved connector. Ride it at paved_track_speed
+    -- (20) instead of clamping to the ~10 km/h asphalt-connector speed -- a pleasant, good connector. But a
+    -- paved track is still WORSE for a gravel bike than a real unpaved gravel road, so it stays clearly below
+    -- GRAVEL_SPEED (30): otherwise it ties the parallel gravel and the shorter asphalt line wins (Leipzig
+    -- Oberer/Unterer Uferweg, Pflaumenallee). Only track/path (not roads), only when a tracktype grade is
+    -- present. Guarded below so the path->default_speed reset and the surface clamp don't undo it.
     local is_gravel_paved_track = cfg.profile == "gravel"
         and (data.highway == "track" or data.highway == "path")
         and tracktype and profile.tracktype_speeds[tracktype]
@@ -777,7 +778,13 @@ function BikeCommon.make_profile(cfg)
         local good_surface = surface ~= nil and is_road_surface(surface)
         local good_smoothness = data.smoothness == "excellent" or data.smoothness == "good"
         if is_gravel_paved_track then
-          speed = profile.tracktype_speeds[tracktype]
+          -- A paved track/path is a good connector but WORSE for a gravel bike than a real unpaved gravel
+          -- road, so ride it at paved_track_speed (20), clearly below GRAVEL_SPEED (30) — otherwise it ties
+          -- the parallel gravel and the shorter asphalt line wins (Leipzig Oberer/Unterer Uferweg,
+          -- Pflaumenallee). Still well above the ~10 asphalt-connector base, so it stays pleasant to ride.
+          -- min() keeps a rare paved grade5 at its slower tracktype speed (11).
+          speed = math.min(cfg.paved_track_speed or profile.tracktype_speeds[tracktype],
+                           profile.tracktype_speeds[tracktype])
         elseif good_surface then
           -- surface speed; an allowed-but-unlisted surface (gravel profile's permissive
           -- is_allowed_surface) falls back to default_speed. Explicit 0 entries are preserved.
