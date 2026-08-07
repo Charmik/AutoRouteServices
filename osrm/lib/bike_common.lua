@@ -843,6 +843,16 @@ function BikeCommon.make_profile(cfg)
         -- are held down here. A footway/path tagged bicycle=designated is real cycle infra, handled separately.
         and not ((data.highway == "footway" or data.highway == "pedestrian" or data.highway == "steps")
                  and data.foot == "designated" and data.bicycle ~= "designated")
+        -- Don't promote a bridleway. gravel.lua deliberately sets bicycle_speeds.bridleway =
+        -- VERY_LOW_SPEED (horse tracks are churned-up, soft and narrow — often width=1 — and are
+        -- horse-priority infra, not gravel-bike terrain), but virtually every bridleway also carries an
+        -- unpaved surface tag, so this promotion restored it to full GRAVEL_SPEED and made it one of the
+        -- FASTEST ways in the graph. That left the VERY_LOW_SPEED entry dead except on the rare paved or
+        -- untagged bridleway. e.g. Leipzig way 114840900 (bridleway horse=designated surface=ground
+        -- width=1) rode at 40-45 km/h and beat the parallel fine_gravel track 60101136 ~48 m away.
+        -- Without the gate a bridleway keeps its VERY_LOW_SPEED base, matching the already-correct
+        -- surface=mud bridleway 86715121 (~0.4 km/h) -> LeipzigRoutesTest.testHorseRoads.
+        and data.highway ~= "bridleway"
         -- Only PREFERRED (unpaved) surfaces promote. A paved surface (asphalt/concrete/paving_stones =
         -- default_speed) must never RAISE a deliberately-lowered highway base (e.g. tertiary =
         -- default_speed/3): gravel takes the MIN of base and paved-surface speed there, so a discouraged

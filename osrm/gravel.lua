@@ -92,7 +92,7 @@ local cfg = {
                                        -- driveway access is still gated by the access rules.
     track           = default_speed,   -- gravel override: was LOW_SPEED in road
     path            = default_speed,   -- gravel override: was LOW_SPEED in road
-    bridleway       = default_speed,   -- gravel addition: not present in bicycle.lua
+    bridleway       = VERY_LOW_SPEED,   -- gravel addition: not present in bicycle.lua
     footway         = VERY_LOW_SPEED
   },
 

@@ -5,8 +5,12 @@ mkdir -p ~/data
 mkdir -p ~/disk
 mkdir -p ~/.m2/repository/com/wolt
 
-#sudo apt-get install -y python3.8-venv htop vim tmux pipx git build-essential git cmake pkg-config libbz2-dev libxml2-dev libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev maven
-sudo apt-get install -y htop vim tmux pipx git build-essential git cmake pkg-config libbz2-dev libxml2-dev libzip-dev libboost-all-dev lua5.2 liblua5.2-dev libtbb-dev maven osmium-tool
+# osrm-backend gets boost/tbb/lua/bzip2/libxml2/libarchive from vcpkg now (see
+# vcpkg.json), so the -dev packages for those are gone. What's left is the
+# toolchain plus the autotools bits some vcpkg ports need to bootstrap.
+sudo apt-get install -y htop vim tmux pipx maven osmium-tool \
+    git build-essential cmake ninja-build pkg-config \
+    autoconf automake libtool curl zip unzip tar
 wget https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
 sudo dpkg -i jdk-25_linux-x64_bin.deb
 
@@ -20,7 +24,13 @@ sudo apt install -y cmake
 sudo apt install software-properties-common
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
 sudo apt update
-sudo apt install -y gcc-11 g++-11
+# gcc-11 is too old: osrm-backend needs C++20 with working <format>/chrono
+# formatters. CI builds on gcc-14 and gcc-15.
+sudo apt install -y gcc-14 g++-14
+
+# vcpkg provides osrm-backend's dependencies in manifest mode. build_osrm_native.sh
+# clones it on demand, but export VCPKG_ROOT so cmake --preset works by hand too.
+echo 'export VCPKG_ROOT=$HOME/vcpkg' >> ~/.bashrc
 
 sudo apt install -y python3-pip
 pip3 install --break-system-packages aiohttp

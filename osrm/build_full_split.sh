@@ -8,6 +8,8 @@ set -x
 # $3 (optional): full - when provided, download files and run osmium + ModifyOsmWays
 # --profile road|gravel (required, may appear anywhere): which bike profile to build
 
+#/home/charm/disk/osrm-backend/build/osrm-contract -t 12 planet-part1-modified.osrm --segment-speed-file /home/charm/disk/traffic_dumps/traffic_final_gravel.csv
+#cd ~/data
 #sudo swapoff -a
 #rm -f swap
 #sudo fallocate -l 750G swap # 256RAM + 440 is not enough for extract
@@ -69,10 +71,15 @@ if [ "$PROFILE" = "gravel" ]; then
     LUA_FILE="gravel.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
     ROUTED_PORT=8004
+    # gravel keeps unpaved ways too, so the graph is bigger: +15G over road
+    PART1_MEM=175G
+    PART2_MEM=85G
 else
     LUA_FILE="bicycle.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
     ROUTED_PORT=8003
+    PART1_MEM=160G
+    PART2_MEM=70G
 fi
 echo "Building split graph: profile=$PROFILE lua=$LUA_FILE traffic=$TRAFFIC_CSV port=$ROUTED_PORT"
 
@@ -118,6 +125,8 @@ mkdir -p ~/disk
 START_TIME=$(date +%s)
 DATE=$(date +%d.%m.%Y)
 BASE_DIR=~/disk/osrm_${DATE}_${ALGORITHM}_${PROFILE}
+# Pristine post-extract snapshot, see snapshot_extract() below.
+EXTRACT_DIR=${BASE_DIR}_extract
 date
 telegram-send "Started osrm split build $PART $ALGORITHM $PROFILE $(hostname)"
 cd ~/disk
@@ -128,7 +137,8 @@ if [ ! -d "osrm-backend/build" ]; then
     rm -rf osrm-backend
     git clone https://github.com/Charmik/osrm-backend.git
     cd ~/disk/osrm-backend
-    git checkout fix-segfaults-asserts-hacks
+#    git checkout fix-segfaults-asserts-hacks
+    git checkout master_fresh_with_compact_fix
     mkdir -p build
     cd ~/disk/osrm-backend/build
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wno-error -w" -DCMAKE_CXX_FLAGS="-Wno-error -w"
@@ -201,6 +211,25 @@ else
     echo "Skipping download and osmium merge (not in full mode)"
 fi
 
+# Save a pristine copy of a part right after extract, before any speed file is applied.
+# osrm-contract/osrm-customize run the updater, which rewrites .osrm.geometry in place with the
+# traffic CSV applied *before* contraction/customization starts. The `*` and `/` tokens in the CSV
+# are relative to the current speed, so re-running on an already-updated graph double-applies them
+# (a /10 penalty becomes /100). If contract/customize crashes, restore from here and re-run instead
+# of re-extracting:
+#   rm -rf $BASE_DIR/partN && cp -a ${EXTRACT_DIR}/partN $BASE_DIR/
+# Usage: snapshot_extract <part_number>
+snapshot_extract() {
+    local part_num=$1
+    local part_dir="$BASE_DIR/part${part_num}"
+    local dest="$EXTRACT_DIR/part${part_num}"
+
+    echo "Snapshotting post-extract Part ${part_num} to ${dest}..."
+    mkdir -p "$EXTRACT_DIR"
+    rm -rf "$dest"
+    cp -r "$part_dir" "$dest" || { echo "extract snapshot part${part_num} failed"; telegram-send "extract snapshot part${part_num} failed $(hostname)"; exit 1; }
+}
+
 # Function to setup and process a part
 # Usage: process_part <part_number>
 process_part() {
@@ -221,6 +250,8 @@ process_part() {
     ~/disk/osrm-backend/build/osrm-extract -t $(nproc) --location-dependent-data driving_side.geojson -p ${LUA_FILE} ${pbf_file} || { echo "osrm-extract part${part_num} failed"; telegram-send "osrm-extract part${part_num} failed $(hostname)"; exit 1; }
     #telegram-send "Part ${part_num} extract finished $(hostname)"
 
+    snapshot_extract ${part_num}
+
     if [ "$ALGORITHM" = "mld" ]; then
         ~/disk/osrm-backend/build/osrm-partition -t $(nproc) ${osrm_file} || { echo "osrm-partition part${part_num} failed"; telegram-send "osrm-partition part${part_num} failed $(hostname)"; exit 1; }
         #telegram-send "Part ${part_num} partition finished $(hostname)"
@@ -228,9 +259,9 @@ process_part() {
 #        if [ -f $HOME/disk/traffic_dumps/traffic_final_turns.csv ]; then
 #            CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
 #        fi
-        ~/disk/osrm-backend/build/osrm-customize -t $(nproc) ${osrm_file} $CUSTOMIZE_ARGS || { echo "osrm-customize part${part_num} failed"; telegram-send "osrm-customize part${part_num} failed $(hostname)"; exit 1; }
+        ~/disk/osrm-backend/build/osrm-customize -t $(nproc) ${osrm_file} $CUSTOMIZE_ARGS || { echo "osrm-customize part${part_num} failed - do NOT re-run on this dir, restore first: rm -rf $part_dir && cp -a $EXTRACT_DIR/part${part_num} $BASE_DIR/"; telegram-send "osrm-customize part${part_num} failed $(hostname)"; exit 1; }
     else
-        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file "$TRAFFIC_CSV" || { echo "osrm-contract part${part_num} failed"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
+        ~/disk/osrm-backend/build/osrm-contract -t $(nproc) ${osrm_file} --segment-speed-file "$TRAFFIC_CSV" || { echo "osrm-contract part${part_num} failed - do NOT re-run on this dir, restore first: rm -rf $part_dir && cp -a $EXTRACT_DIR/part${part_num} $BASE_DIR/"; telegram-send "osrm-contract part${part_num} failed $(hostname)"; exit 1; }
     fi
     rm *.osrm.ebg *.osrm.cnbg *.osrm.cnbg_to_ebg *.osrm.enw *.osrm.turn_penalties_index *.osrm.restrictions
     telegram-send "Part ${part_num} $ALGORITHM $PROFILE finished $(hostname)"
@@ -281,8 +312,8 @@ start_server() {
 }
 
 if [ "$DO_PART1" = true ]; then
-    start_server 1 ${ROUTED_PORT} 160G
+    start_server 1 ${ROUTED_PORT} ${PART1_MEM}
 fi
 if [ "$DO_PART2" = true ]; then
-    start_server 2 ${ROUTED_PORT} 70G
+    start_server 2 ${ROUTED_PORT} ${PART2_MEM}
 fi
