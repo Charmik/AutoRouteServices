@@ -25,6 +25,26 @@ local MEDIUM_SPEED   = 10   -- rough-but-rideable gravel (sand/grade5/rough smoo
                             -- LOW_SPEED stays punitive for genuinely-avoid cases (expressway/NHS/cobblestone).
 local LOW_SPEED      = 3
 local VERY_LOW_SPEED = 0.5
+local ROUGH_SPEED    = 10   -- smoothness=very_bad: rideable on a gravel bike, but nothing like a compacted or
+                            -- good-smoothness gravel road, so it is demoted to a plain CONNECTOR. Sits exactly
+                            -- at the asphalt baseline (default_speed 10) — below a paved track (15) and below
+                            -- an unpaved footway (20), and 4x below GRAVEL_SPEED2 (40), so real gravel always
+                            -- wins the tie and a rough track is ridden only when it genuinely shortcuts.
+local HORRIBLE_SPEED = 5   -- smoothness=horrible: a notch below very_bad (10) and HALF the asphalt baseline,
+                            -- so it is ridden only when it shortcuts more sharply still.
+local IMPASSABLE_SPEED = 2  -- smoothness=impassable: the bottom rung, but still a SPEED, not a ban. The rungs
+                            -- above are applied as a hard ceiling at the end of process_way, and OSRM costs a
+                            -- way by length/speed, so a low-but-nonzero speed is self-limiting: at 2 km/h a
+                            -- 100 m stretch already costs 180 s, so nothing but a few-metre connector is ever
+                            -- worth riding. VERY_LOW_SPEED (0.5) crossed the line from "avoid" into a de-facto
+                            -- ban — the way stays in the graph and routable, it is simply priced out of every
+                            -- route: OSM way 1104143938 is a 4.5 m highway=path link tagged
+                            -- smoothness=impassable that stitches together the gravel network west of Leipzig,
+                            -- and pricing it at 0.5 km/h cost 32 s to cross 4.5 m — enough to push the whole
+                            -- corridor from 256 s to over 278 s and send the route down bridleway 114840900
+                            -- instead (LeipzigRoutesTest.testHorseRoads). Same reasoning that retuned
+                            -- very_bad/horrible off their dead-table values; those two rungs simply were not
+                            -- carried down to the bottom of the ladder when the table went live.
 local FOOTWAY_UNPAVED_SPEED = 20  -- unpaved footway (surface=compacted/gravel/dirt): rideable park/greenway
                                   -- path. Well above asphalt (default_speed) and a paved footway (VERY_LOW)
                                   -- so it competes with a parallel gravel road, but clearly below a real
@@ -167,17 +187,34 @@ local cfg = {
   -- Smoothness: gravel bikes ride comfortably up to "bad" (rough but rideable doubletrack/gravel — a
   -- gravel bike's home turf, so it rides at GRAVEL_SPEED, not a crawl; penalising it to LOW_SPEED made
   -- ridden gravel tracks like OSM way 711541590 a 3 km/h chokepoint and pushed routes onto parallel
-  -- asphalt). "very_bad" and below stay slow: genuinely rough, walk-your-bike terrain.
+  -- asphalt). "very_bad" and below are genuinely rough terrain and are held down to the ROUGH_SPEED rungs.
+  --
+  -- The four ROUGH values (very_bad and worse) are applied by bike_common as a CAP (math.min) on the final
+  -- way speed; the smoother entries stay informational, read only by the legacy `== 0` branch. Before that,
+  -- only the `== 0` case was ever consulted, so on gravel — where no entry is 0 — the whole table was dead:
+  -- a grade4 grass track tagged smoothness=very_bad rode the full GRAVEL_SPEED2 40, indistinguishable from
+  -- clean gravel (OSM ways 296107005 / 435708230 / 34229737). The old very_bad=3 / horrible=0.5 /
+  -- impassable=0.5 values were written for a table that never fired; applying them literally would have
+  -- banned such ways outright, hence the retune to "usable but clearly worse" — see IMPASSABLE_SPEED for the
+  -- bottom rung, where a ban-level value cost a Leipzig gravel corridor a 4.5 m connector. Capping the smooth
+  -- end is deliberately NOT done: it would make an explicitly-tagged way slower than an identical untagged one.
+  --
+  -- Resulting ladder: impassable 2 < very_horrible 3 < horrible 5 < asphalt 10 = very_bad 10
+  --                   < paved track 15 < unpaved footway 20 < grade4/dirt 40 < compacted/grade1-3 50.
+  -- So a very_bad way is held to the asphalt/connector rung, NOT to a gravel rung: it keeps its place in
+  -- the graph but stops competing with real gravel. This is why a grade4 track that also carries
+  -- smoothness=very_bad no longer rides at gravel speed — see the GRADE4_CASES note in
+  -- OsrmRoutingGermanyGravelTest, which deliberately samples only grade4 ways WITHOUT a rough tag.
   smoothness_speeds = {
     excellent       = GRAVEL_SPEED1,
     good            = GRAVEL_SPEED1,
     very_good       = GRAVEL_SPEED1,
     intermediate    = GRAVEL_SPEED1,
     bad             = GRAVEL_SPEED2,
-    very_bad        = LOW_SPEED,
-    horrible        = VERY_LOW_SPEED,
-    very_horrible   = VERY_LOW_SPEED,
-    impassable      = VERY_LOW_SPEED
+    very_bad        = ROUGH_SPEED,
+    horrible        = HORRIBLE_SPEED,
+    very_horrible   = LOW_SPEED,
+    impassable      = IMPASSABLE_SPEED
   },
 
   -- Verbatim copy of bicycle.lua's avoid set. track/path/bridleway are NOT listed here

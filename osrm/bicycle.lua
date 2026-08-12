@@ -108,11 +108,13 @@ local cfg = {
   },
 
   tracktype_speeds = {
-    grade1 = default_speed / 2,   -- unsurfaced grade1 track: half speed (was default_speed)
-    grade2 = 0,   -- Speed 0 for grade2 (avoid)
-    grade3 = 0,   -- Speed 0 for grade3 (avoid)
-    grade4 = 0,   -- Speed 0 for grade4 (avoid)
-    grade5 = 0    -- Speed 0 for grade5 (avoid)
+    grade1 = LOW_SPEED,   -- unsurfaced grade1 track (was default_speed/2). A grade1 track WITH a road
+                          -- surface still rides at its surface speed - see the tracktype branch in
+                          -- bike_common.speed_handler; this value only bites on unsurfaced ones.
+    grade2 = 0,
+    grade3 = 0,
+    grade4 = 0,
+    grade5 = 0
   },
 
   smoothness_speeds = {

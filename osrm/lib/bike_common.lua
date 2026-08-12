@@ -22,6 +22,17 @@ Measure = require("lib/measure")
 
 local BikeCommon = {}
 
+-- smoothness values that mark genuinely rough ground: rideable on a gravel bike, but nothing like a
+-- compacted or good-smoothness gravel road, so the gravel profile caps their speed at the end of
+-- process_way. Plain "bad" is deliberately absent — that is a gravel bike's home turf. Kept in sync with
+-- GravelWayTags.ROUGH_SMOOTHNESS on the Java side, which gates the gravel CSV's HG1 pin on the same set.
+local ROUGH_SMOOTHNESS = Set {
+  'very_bad',
+  'horrible',
+  'very_horrible',
+  'impassable',
+}
+
 function BikeCommon.make_profile(cfg)
   local VERY_LOW_SPEED = cfg.very_low_speed
   local LOW_SPEED = cfg.low_speed
@@ -33,6 +44,32 @@ function BikeCommon.make_profile(cfg)
   -- exact original body, so behavior is unchanged.
   local function is_road_surface(surface)
     return cfg.is_allowed_surface(surface)
+  end
+
+  -- Road: paving_stones is rated 10 km/h as a generic surface (rattly under a road bike), but a
+  -- paving_stones CYCLE LANE is normal, well-laid cycle paving and rides far better than that. On
+  -- dedicated cycle infrastructure (highway=cycleway, or bicycle=designated) give it the same x2 the
+  -- cycleway branches give asphalt, i.e. 20 km/h -- still clearly below asphalt cycle infra (50), so a
+  -- smooth parallel path still wins. Consulted at EVERY place surface_speeds is read for such a way:
+  -- speed_handler clamps the surface speed in three separate spots and a later one would otherwise
+  -- recompute the unboosted 10 straight back in. Gravel is untouched (its paving_stones handling is
+  -- deliberately different -- see boost_cycle_surface).
+  --
+  -- segregated=no excluded: "dedicated cycle infrastructure" is exactly what such a way is NOT. It is a
+  -- shared-use promenade/towpath where pedestrians have equal run of the surface, so a road bike cannot
+  -- hold the speed the boost assumes -- you are weaving through people on foot. Boosting it doubled the
+  -- Putney Thames Path (ways 3677792 / 1485123650, highway=cycleway + foot=designated + segregated=no +
+  -- surface=paving_stones) from 20 to 40 km/h, which made a 433 m towpath shortcut beat the 498 m road
+  -- line in OsrmRoutingUKTest. The x2 cycleway multiplier still applies to it (10 -> 20) as it always
+  -- did; only this surface boost, which is scoped to genuine cycle infrastructure, is withheld.
+  local function surface_speed_for(profile, data, surf)
+    local sp = profile.surface_speeds[surf]
+    if sp and cfg.profile == "road" and surf == "paving_stones"
+        and data.segregated ~= "no"
+        and (data.highway == "cycleway" or data.bicycle == "designated") then
+      return sp * 2
+    end
+    return sp
   end
 
   -- Paved / firm surface family (asphalt-grade). Used to gate the bicycle=designated footway/path speed
@@ -309,6 +346,16 @@ function BikeCommon.make_profile(cfg)
         'opposite_lane',
         'opposite_track',
         'opposite_share_busway'
+      },
+
+      -- Cycle infrastructure that, when tagged on BOTH sides of a one-way road, in practice means a
+      -- contraflow lane: one of the two sides runs against the traffic direction. A deliberate
+      -- subset of cycleway_tags -- 'separate' means the infrastructure is a parallel way (so this
+      -- road carries none) and 'crossing'/'link'/'traffic_island' are not riding infrastructure.
+      contraflow_cycleway_tags = Set {
+        'lane',
+        'track',
+        'share_busway',
       },
 
       -- Cycleway tag values that mark a road as "bike-friendly with cars":
@@ -814,9 +861,10 @@ function BikeCommon.make_profile(cfg)
     end
     -- it always decrease cycleway speeds (but a gravel paved track/path with a tracktype keeps its
     -- tracktype speed -- the surface clamp would otherwise drag it back to the paved connector speed)
-    if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed)
+    local clamp_surface_speed = surface and surface_speed_for(profile, data, surface)
+    if (surface and clamp_surface_speed and clamp_surface_speed < speed)
         and not is_gravel_paved_track then
-      speed = profile.surface_speeds[surface]
+      speed = clamp_surface_speed
     end
     -- Gravel: a known gravel-preferred surface SETS the speed (promotes up), not just caps it.
     -- The block above only promotes surface speed INSIDE the tracktype branch, so a gravel road
@@ -924,6 +972,17 @@ function BikeCommon.make_profile(cfg)
       if (data.highway == "cycleway" or data.bicycle == "designated") then --https://www.openstreetmap.org/way/1052708536
         result.forward_speed = speed * cycleWayMultiplicator
         result.backward_speed = speed * cycleWayMultiplicator
+        -- Dedicated cycle infrastructure is walkable, so a direction closed by oneway:bicycle=yes/-1 must
+        -- stay reachable on foot (bike_push_handler -> mode.pushing_bike at walking_speed). Every sibling
+        -- speed branch sets this flag; this one did not, and the omission is only visible on a way FAST
+        -- enough to reach this branch: the same segregated sidepath chain along Prager Straße (Leipzig) is
+        -- pushable where it is surface=paving_stones (10 km/h -> falls through to the designated
+        -- footway/path branch below, which sets the flag) and a hard wall where it is surface=asphalt
+        -- (25 -> x2 = 50 km/h -> lands here). A destination on the asphalt half then cost a ~1000 m loop
+        -- down Prager Straße and back instead of pushing the last ~40 m (ways 331359824 / 826279026 /
+        -- 826279027, oneway:bicycle=yes). Backward pushing stays gated on `oneway` being absent inside
+        -- bike_push_handler, so a plain oneway=yes street is NOT opened up by this.
+        data.way_type_allows_pushing = true
       elseif (data.bicycle_road == "yes" or data.cyclestreet == "yes") and ((data.cycleway_left == "track" and is_road_surface(data.cycleway_surface)) or (data.cycleway_right == "track" and is_road_surface(data.cycleway_surface))) then --https://www.openstreetmap.org/way/11550988
         result.forward_speed = speed * cycleWayMultiplicator
         result.backward_speed = speed * cycleWayMultiplicator
@@ -1014,7 +1073,7 @@ function BikeCommon.make_profile(cfg)
       -- x2 like a cycleway. The surface gate is the ONLY per-profile difference, in boost_cycle_surface():
       -- road boosts genuinely paved paths; gravel boosts UNPAVED ones (a paved designated path on gravel
       -- stays a plain connector at its base speed). Same split as the cycleway branch above.
-      local base_speed = profile.surface_speeds[surface] or profile.default_speed
+      local base_speed = surface_speed_for(profile, data, surface) or profile.default_speed
       if cfg.profile == "gravel" then
         -- gravel: x2 an UNPAVED designated path (dedicated gravel cycle infra); paved stays a connector.
         if boost_cycle_surface(surface) then
@@ -1141,8 +1200,9 @@ function BikeCommon.make_profile(cfg)
           speed = profile.walking_speed
         end
       end
-      if (surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] < speed) then
-        speed = profile.surface_speeds[surface]
+      local fallback_surface_speed = surface and surface_speed_for(profile, data, surface)
+      if (surface and fallback_surface_speed and fallback_surface_speed < speed) then
+        speed = fallback_surface_speed
       end
       result.forward_speed = speed
       result.backward_speed = speed
@@ -1206,10 +1266,44 @@ function BikeCommon.make_profile(cfg)
     end
   end
 
+  -- A road that is one-way for cars can still be legally ridden in the opposite direction when it
+  -- carries a contraflow cycle lane. OSM's explicit marker is oneway:bicycle=no (handled by the
+  -- oneway_bicycle branches in oneway_handler), but a large share of ways only carry the
+  -- infrastructure tags:
+  --   * cycleway:both=<lane|track|share_busway> puts cycle infrastructure on BOTH sides of a
+  --     one-way street, which in practice means one of the two sides runs against the traffic
+  --     direction. An inference, not a certainty -- the strict markers are oneway:bicycle=no and
+  --     cycleway:*:oneway=-1, and this must not be extended as if it were proof. Keying off :both
+  --     rather than :left keeps it independent of the driving side -- in left-hand-traffic
+  --     countries the left side is the WITH-traffic one.
+  --   * the deprecated cycleway[:left|:right]=opposite* scheme says "contraflow" outright.
+  -- The cycleway:both inference is ours. Stock OSRM reopens the reverse direction only for the
+  -- opposite* values: its cycleway_handler runs AFTER oneway_handler, so is_twoway is already false
+  -- on a oneway road and 'lane' is not in opposite_cycleway_tags. (osm.org's routed-bike does ride
+  -- the way below westbound, but as mode=pushing_bike -- the FOSSGIS profile lets you WALK a bike
+  -- against a oneway. That would open every oneway street backward at walking speed; this rule
+  -- stays on the ~25 Saxony ways that actually advertise infrastructure on both sides.)
+  -- e.g. https://www.openstreetmap.org/way/1445435407 -- a 2.7m carriageway-merge stub of Riesaer
+  -- Straße (Leipzig) whose oneway=yes dead-ends the entire westbound carriageway.
+  local function has_contraflow_cycleway(profile, data)
+    if data.cycleway_both and profile.contraflow_cycleway_tags[data.cycleway_both] then
+      return true
+    end
+    return (data.cycleway and profile.opposite_cycleway_tags[data.cycleway])
+        or (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left])
+        or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right])
+  end
+
   local function oneway_handler(profile,way,result,data)
     -- oneway
     data.implied_oneway = data.junction == "roundabout" or data.junction == "circular" or data.highway == "motorway"
     data.reverse = false
+
+    -- Only the plain oneway=* branches consult this: an explicit oneway:bicycle wins over any
+    -- inferred contraflow. implied_oneway is excluded here rather than relying on branch order,
+    -- because a roundabout/motorway tagged oneway=yes outright takes the oneway branch below and
+    -- would otherwise be opened backward.
+    local contraflow = has_contraflow_cycleway(profile, data) and not data.implied_oneway
 
     if data.oneway_bicycle == "yes" or data.oneway_bicycle == "1" or data.oneway_bicycle == "true" then
       result.backward_mode = mode.inaccessible
@@ -1219,11 +1313,15 @@ function BikeCommon.make_profile(cfg)
       result.forward_mode = mode.inaccessible
       data.reverse = true
     elseif data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" then
-      result.backward_mode = mode.inaccessible
+      if not contraflow then
+        result.backward_mode = mode.inaccessible
+      end
     elseif data.oneway == "no" or data.oneway == "0" or data.oneway == "false" then
       -- prevent other cases
     elseif data.oneway == "-1" then
-      result.forward_mode = mode.inaccessible
+      if not contraflow then
+        result.forward_mode = mode.inaccessible
+      end
       data.reverse = true
     elseif data.implied_oneway then
       result.backward_mode = mode.inaccessible
@@ -1334,9 +1432,19 @@ function BikeCommon.make_profile(cfg)
           elseif data.foot_backward == 'yes' then
             push_backward_speed = profile.walking_speed
           elseif data.way_type_allows_pushing then
-            push_forward_speed = profile.walking_speed
+            -- Half walking_speed, NOT walking_speed. These segments still get the traffic CSV's cycling
+            -- popularity multiplier (up to *2.5 on a busy cycle corridor) applied on top, because the CSV
+            -- is keyed on node pairs and knows nothing about travel mode. At the plain walking_speed a
+            -- pushed bike therefore ends up modelled at ~7.6 km/h -- faster than anyone walks a bike, and
+            -- cheap enough that OSRM would walk 175 m the wrong way down the oneway:bicycle=yes Prager
+            -- Straße sidepath (Leipzig, way 331359824) rather than ride round to its legal end. Halving the
+            -- base lands the effective pace back at ~3.8 km/h, so pushing stays what it should be: a last
+            -- resort for the final few tens of metres when the destination itself sits on a way you may not
+            -- ride (way 331359824 again, where the alternative is a 1000 m loop).
+            local push_speed = profile.walking_speed / 2
+            push_forward_speed = push_speed
             if not data.implied_oneway and not (data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" or data.oneway == "-1") then
-              push_backward_speed = profile.walking_speed
+              push_backward_speed = push_speed
             end
           end
         end
@@ -1720,8 +1828,51 @@ function BikeCommon.make_profile(cfg)
       end
     end
 
+    -- Gravel: a ROUGH smoothness tag is a hard CEILING on the final way speed. Applied here, at the very
+    -- end of process_way, so nothing downstream can lift a rough way back over it — speed_handler's own
+    -- hgv=no *1.2 and the cycle-network gravel bonus (lcn +10% .. icn +40%, both above) each ran AFTER the
+    -- surface/tracktype branches and would otherwise carry a very_bad track from 10 to 12-14 km/h.
+    --
+    -- Until now gravel's smoothness_speeds table was dead code: bike_common only consulted it in the
+    -- `smoothness_speed == 0` branch of speed_handler, and gravel has no zero entries (very_bad was 3,
+    -- horrible 0.5). So a track tagged smoothness=very_bad rode the full GRAVEL_SPEED2 40 on the strength of
+    -- its surface/tracktype alone — see OSM ways 296107005 / 435708230 (grade4 very_bad) and 34229737 (dirt
+    -- horrible), all indistinguishable from clean gravel.
+    --
+    -- Deliberately gated to ROUGH_SMOOTHNESS only, NOT the whole table: capping on the smooth end would
+    -- reach beyond the problem and make an explicitly-tagged way slower than an identical untagged one
+    -- (smoothness=bad would pull a compacted grade2 road 50 -> 40; smoothness=excellent would clip the
+    -- hgv=no bonus 60 -> 50). The smoother entries stay informational, exactly as before this change.
+    -- Mirrors GravelWayTags.ROUGH_SMOOTHNESS on the Java side (the gravel CSV's HG1 pin), lower-cased the
+    -- same way so a Very_Bad tag can't take one path and not the other.
+    --
+    -- min(), never max(): a roughness tag may only LOWER the speed. The road profile is deliberately
+    -- untouched — its table is tuned for the `== 0` branch.
+    if cfg.profile == "gravel" and data.smoothness and ROUGH_SMOOTHNESS[string.lower(data.smoothness)] then
+      local smoothness_cap = profile.smoothness_speeds[string.lower(data.smoothness)]
+      if smoothness_cap and smoothness_cap > 0 then
+        if result.forward_speed and result.forward_speed > 0 then
+          result.forward_speed = math.min(result.forward_speed, smoothness_cap)
+        end
+        if result.backward_speed and result.backward_speed > 0 then
+          result.backward_speed = math.min(result.backward_speed, smoothness_cap)
+        end
+      end
+    end
+
     if data.highway == "cycleway" then
-      result.highway_turn_classification = 1
+      -- Tier 6: a cycleway explicitly NOT separated from pedestrians (segregated=no) — a shared-use
+      -- promenade/towpath rather than dedicated cycle infrastructure. process_turn treats tier 6
+      -- exactly like tier 1 everywhere tier 1 was already honoured, so this split changes nothing on
+      -- its own; it exists only so the slow-cycleway turn-cap bypass below does NOT apply here.
+      -- Weaving through pedestrians makes junctions on such a path genuinely costly, and making them
+      -- free let a 433 m Putney towpath shortcut (Thames Path, ways 3677792 / 1485123650, all
+      -- segregated=no + foot=designated) beat the 498 m road line in OsrmRoutingUKTest.
+      if data.segregated == "no" then
+        result.highway_turn_classification = 6
+      else
+        result.highway_turn_classification = 1
+      end
     elseif data.junction == "roundabout" or data.junction == "circular" then
       -- Tier 4: roundabout ring segment. Circulating the ring produces a chain of
       -- slight "turns" at every arm node that can sum to 100s+ for a 60m ring
@@ -1885,10 +2036,25 @@ function BikeCommon.make_profile(cfg)
     turn.duration = math.min(turn.duration, MAX_TURN_PENALTY)
 
     --"cycleway"
-    local source_is_fast_cycleway = is_fast_road(turn.source_speed, profile)
-    local target_is_fast_cycleway = is_fast_road(turn.target_speed, profile)
+    -- A dedicated cycleway (turn class 1) qualifies for the caps below on its own, without having to
+    -- clear is_fast_road() as well. The speed visible here is the EXTRACT-stage lua speed, computed
+    -- before osrm-customize applies the traffic CSV multipliers: an urban surface=paving_stones
+    -- cycleway is 10 km/h at this point yet rides at 25 km/h in the customized graph (its *2.5
+    -- heatmap token). Gating on that raw speed skipped this whole block for such corridors, so every
+    -- junction where OSM splits a sidepath into separate ways kept a full uncapped angle penalty.
+    -- Leipzig Ludwig-Erhard-Straße/Gerichtsweg: 22 + 55 + 70 + 32 s over four junctions, enough to
+    -- make a 1754 m sidepath route lose to a 2541 m detour by 23 s.
+    -- U-turns are excluded from the class-1 bypass: the cap below is a flat 0, which would also wipe
+    -- the 1000 base + u_turn_penalty and make doubling back on a slow bidirectional cycleway free
+    -- (out-and-back spurs). A fast cycleway already opened the gate before this change, so leaving
+    -- U-turns to the speed test alone keeps every previously-reachable turn cost untouched.
+    -- Class 6 (shared-use, segregated=no) is deliberately NOT in the bypass -- see process_way -- but
+    -- it IS honoured by the tier-1 branch below, so a fast shared path keeps its pre-change free turn.
+    local is_dedicated_cycleway = function(classification) return classification == 1 or classification == 6 end
+    local source_is_fast_cycleway = is_fast_road(turn.source_speed, profile) or (turn.source_highway_turn_classification == 1 and not turn.is_u_turn)
+    local target_is_fast_cycleway = is_fast_road(turn.target_speed, profile) or (turn.target_highway_turn_classification == 1 and not turn.is_u_turn)
     if (source_is_fast_cycleway or target_is_fast_cycleway) then
-      if turn.source_highway_turn_classification == 1 or turn.target_highway_turn_classification == 1 then
+      if is_dedicated_cycleway(turn.source_highway_turn_classification) or is_dedicated_cycleway(turn.target_highway_turn_classification) then
         --turn.duration = math.min(turn.duration, 29)
         turn.duration = 0
         --turn_friendly_cycleway_tags
