@@ -250,7 +250,7 @@ process_part() {
     ~/disk/osrm-backend/build/osrm-extract -t $(nproc) --location-dependent-data driving_side.geojson -p ${LUA_FILE} ${pbf_file} || { echo "osrm-extract part${part_num} failed"; telegram-send "osrm-extract part${part_num} failed $(hostname)"; exit 1; }
     #telegram-send "Part ${part_num} extract finished $(hostname)"
 
-    snapshot_extract ${part_num}
+    #snapshot_extract ${part_num}
 
     if [ "$ALGORITHM" = "mld" ]; then
         ~/disk/osrm-backend/build/osrm-partition -t $(nproc) ${osrm_file} || { echo "osrm-partition part${part_num} failed"; telegram-send "osrm-partition part${part_num} failed $(hostname)"; exit 1; }

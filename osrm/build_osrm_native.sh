@@ -51,7 +51,7 @@ if ! cmake_ok "$CMAKE"; then
     fi
     if [ -z "$CMAKE" ]; then
         echo "Need CMake >= $CMAKE_MIN (system cmake is $(cmake --version 2>/dev/null | head -1))."
-        echo "Install a newer one, e.g. 'pip install cmake' or the Kitware apt repo."
+        echo "Install a newer one, e.g. 'pip install --break-system-packages cmake' or the Kitware apt repo."
         exit 1
     fi
     echo "System cmake is too old, using $CMAKE ($("$CMAKE" --version | head -1))"
@@ -74,6 +74,9 @@ if [ "$FULL" = true ]; then
 #    git checkout fix-segfaults-asserts-hacks
     git checkout master_fresh_with_compact_fix
 fi
+
+cd $SRC
+git pull
 
 rm -rf "$SRC/build"
 mkdir -p "$SRC/build"
