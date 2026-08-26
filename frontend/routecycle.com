@@ -24,7 +24,7 @@ server {
     }
 
     location /reverse {
-        proxy_pass http://138.201.60.221:2322/reverse;
+        proxy_pass http://176.9.23.116:2322/reverse;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -33,7 +33,7 @@ server {
     }
 
     location /api {
-        proxy_pass http://138.201.60.221:2322/api;
+        proxy_pass http://176.9.23.116:2322/api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
