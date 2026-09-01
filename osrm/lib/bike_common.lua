@@ -46,6 +46,42 @@ function BikeCommon.make_profile(cfg)
     return cfg.is_allowed_surface(surface)
   end
 
+  -- A bridleway anyone has recorded as cyclable. gravel.lua bans bridleways outright
+  -- (bicycle_speeds.bridleway = VERY_LOW_SPEED) because a German Reitweg is churned-up, narrow,
+  -- horse-PRIORITY infrastructure. In England and Wales the same OSM tag means something else entirely: a
+  -- public bridleway is a legal cycling right of way and the backbone of gravel riding there, and the ban
+  -- was taking the whole network out — 2 030 km in a Chilterns bbox, ridden in only 38% of routing probes.
+  --
+  -- The two are told apart by whether a mapper recorded that bikes may use it, which is exactly the
+  -- distinction and nothing more. Measured: 81.3% of Chilterns bridleway km carries
+  -- bicycle=yes/designated/permissive or designation=public_bridleway/byway, against 16.6% in Saxony — so
+  -- this opens Britain while leaving 83% of Saxony's bridleways (and the Leipzig way 114840900 the ban was
+  -- calibrated on, horse=designated with no bicycle tag) exactly where they were.
+  --
+  -- A plain table rather than Set{}: this file is require()d from the profile's first line, before OSRM's
+  -- lua globals are guaranteed to be in scope.
+  local CYCLE_LEGAL_DESIGNATIONS = {
+    public_bridleway = true,
+    public_byway = true,
+    restricted_byway = true,
+    byway_open_to_all_traffic = true,
+  }
+  local function is_cycle_legal_bridleway(way, data)
+    if data.highway ~= "bridleway" then
+      return false
+    end
+    -- An explicit ban is the more specific statement and always wins. 6 Chilterns bridleways carry
+    -- bicycle=no/private AND a cycle-legal designation; the access handlers should drop them anyway, but
+    -- this rule must not be the one arguing for riding a way somebody said not to ride.
+    if data.bicycle == "no" or data.bicycle == "private" or data.bicycle == "dismount" then
+      return false
+    end
+    if data.bicycle == "yes" or data.bicycle == "designated" or data.bicycle == "permissive" then
+      return true
+    end
+    return CYCLE_LEGAL_DESIGNATIONS[way:get_value_by_key("designation")] == true
+  end
+
   -- Road: paving_stones is rated 10 km/h as a generic surface (rattly under a road bike), but a
   -- paving_stones CYCLE LANE is normal, well-laid cycle paving and rides far better than that. On
   -- dedicated cycle infrastructure (highway=cycleway, or bicycle=designated) give it the same x2 the
@@ -900,7 +936,10 @@ function BikeCommon.make_profile(cfg)
         -- width=1) rode at 40-45 km/h and beat the parallel fine_gravel track 60101136 ~48 m away.
         -- Without the gate a bridleway keeps its VERY_LOW_SPEED base, matching the already-correct
         -- surface=mud bridleway 86715121 (~0.4 km/h) -> LeipzigRoutesTest.testHorseRoads.
-        and data.highway ~= "bridleway"
+        -- ...unless the bridleway is one anyone may legally cycle (see is_cycle_legal_bridleway): there the
+        -- surface tag is describing gravel-bike terrain, not a horse track, and withholding the promotion
+        -- was pricing 1 651 km of Chilterns right-of-way at 0.5 km/h.
+        and (data.highway ~= "bridleway" or is_cycle_legal_bridleway(way, data))
         -- Only PREFERRED (unpaved) surfaces promote. A paved surface (asphalt/concrete/paving_stones =
         -- default_speed) must never RAISE a deliberately-lowered highway base (e.g. tertiary =
         -- default_speed/3): gravel takes the MIN of base and paved-surface speed there, so a discouraged
@@ -1111,12 +1150,20 @@ function BikeCommon.make_profile(cfg)
         and surface and profile.surface_speeds[surface] and profile.surface_speeds[surface] > profile.default_speed then
       -- Pedestrian way (plaza / promenade / pedestrian street) with a mapped GOOD gravel surface
       -- (compacted/gravel/dirt): rideable, but pedestrian ways are pedestrian-PRIORITY, so cap at
-      -- medium_speed — below a footway_unpaved gravel path, and below a real gravel road. A pedestrian
-      -- way with NO surface tag or a paved surface is NOT promoted here (falls through to the walking/push
-      -- fallback), so a mapped-surface pedestrian way is always preferred over a no-info one. Fixes ways
-      -- 452988446 / 481169080 (pedestrian compacted) that used to collapse to walking speed (~3 km/h)
-      -- because `pedestrian` is not in bicycle_speeds. math.min preserves any mtb:scale/smoothness penalty.
-      local ped_speed = math.min(speed, cfg.medium_speed)
+      -- pedestrian_unpaved_speed — below a footway_unpaved gravel path, and below a real gravel road. A
+      -- pedestrian way with NO surface tag or a paved surface is NOT promoted here (falls through to the
+      -- walking/push fallback), so a mapped-surface pedestrian way is always preferred over a no-info one.
+      -- Fixes ways 452988446 / 481169080 (pedestrian compacted) that used to collapse to walking speed
+      -- (~3 km/h) because `pedestrian` is not in bicycle_speeds.
+      --
+      -- The cap used to be medium_speed, which the "unknown gravel" rung below ALSO used, so a mapped
+      -- compacted pedestrian way and a bare untagged path tied and the shorter one won. Once that rung
+      -- moved to its own unknown_gravel_speed the tie became a loss, and OSRM took the untagged path
+      -- (OsrmRoutingRussiaGravelTest.preferCompactedPedestrianOverUntaggedPathTest, way 481169080 vs
+      -- 514500583). Its own rung now, strictly above unknown_gravel_speed, which is what the "a KNOWN
+      -- surface always beats no surface info" rule means. math.min preserves any mtb:scale/smoothness
+      -- penalty.
+      local ped_speed = math.min(speed, cfg.pedestrian_unpaved_speed or cfg.medium_speed)
       result.forward_speed = ped_speed
       result.backward_speed = ped_speed
       data.way_type_allows_pushing = true
@@ -1219,22 +1266,58 @@ function BikeCommon.make_profile(cfg)
     end
 
     -- Gravel: a bare track/path/bridleway with NO road specifics (no surface, tracktype, smoothness,
-    -- or mtb:scale) is an "unknown gravel" way. Ride it at medium_speed: above asphalt (default_speed)
-    -- so it's preferred over paved connectors, but below a known-good gravel surface (GRAVEL_SPEED) and
-    -- not above a known rough surface — explicit tagging always wins. Heatmap popularity then breaks ties.
+    -- or mtb:scale) is an "unknown gravel" way. Ride it above asphalt (default_speed) so it is preferred
+    -- over paved connectors, but below a known-good gravel surface (GRAVEL_SPEED). Heatmap popularity
+    -- then breaks ties.
     -- (Without this they kept default_speed = asphalt, so a paved road of equal length always won.)
-    -- bicycle=designated is EXCLUDED: a designated cycle path is not "unknown" — the dedicated-cycle-infra
-    -- branch above already gave it the unpaved x2 boost (via boost_cycle_surface), and capping it to
-    -- medium_speed here would throw that away, leaving a proven Radweg no faster than a bare track.
+    --
+    -- TRACK and PATH take unknown_gravel_speed; so does a bridleway anyone may legally cycle. A HORSE
+    -- bridleway (see is_cycle_legal_bridleway) deliberately keeps medium_speed. The rung used
+    -- to read cfg.medium_speed for all three, and gravel.lua has since pinned that to 10 = default_speed
+    -- for the sand/grade5 tier — so the rule granted NO preference at all and in fact sat BELOW
+    -- unclassified (default_speed * 1.5 = 15). Not a rounding detail where surface tagging is sparse: in a
+    -- Chilterns bbox 2 498 km of track and 2 607 km of path carry no surface tag, against ~1 200 km and
+    -- ~1 430 km that do, so most of England's off-road network was priced at or under the tarmac beside it.
+    -- Horse bridleways are held back because raising them would contradict two standing decisions at once —
+    -- bicycle_speeds.bridleway = VERY_LOW_SPEED in gravel.lua and the matching HG carve-out in
+    -- TrafficDumpCsvTask.isHorseInfrastructure — and would put an UNTAGGED bridleway 40x above its
+    -- surface=ground twin. Whether Britain's public bridleways deserve their own re-tune is a separate
+    -- question with its own evidence; this rung must not decide it as a side effect.
+    --
+    -- Its own constant so the two tiers can no longer drift into each other; falls back to medium_speed
+    -- for any profile that does not set one.
+    --
+    -- NOTE this rung (20) sits ABOVE the known-rough rungs — smoothness=very_bad / sand / grade5 are all
+    -- held at 10. That reverses the old "explicit tagging always wins" line, deliberately: those tags are
+    -- evidence the ground is BAD, while an untagged track is merely unsurveyed, and the whole point of the
+    -- rung is to beat the paved connectors that sit at 10-15. A way cannot be preferred over tarmac without
+    -- also being preferred over ground someone has recorded as worse than tarmac.
+    -- Applied as a RAISE (math.max), never an override. bicycle=designated used to be excluded here
+    -- because "a designated cycle path is not unknown — the dedicated-cycle-infra branch above already gave
+    -- it the unpaved x2 boost, and capping it to medium_speed would throw that away". That was right while
+    -- the rung was a 10 km/h CAP; now that it is a 20 km/h raise the exclusion inverted the ladder — a bare
+    -- bicycle=designated way kept 10 (a bridleway, 0.5) while a completely UNTAGGED one rode at 20, i.e. the
+    -- strongest cycle tag a mapper can write was the one being punished. And since Java's
+    -- isCycleLegalBridleway counts `designated` as cycle-legal, the exclusion also made the profile and the
+    -- CSV price exactly the ways this change insists they must agree on differently. math.max keeps the
+    -- original protection (a way already faster than the rung is untouched) without either problem.
     if cfg.profile == "gravel"
         and (data.highway == "track" or data.highway == "path" or data.highway == "bridleway")
-        and data.bicycle ~= "designated"
         and not surface and not tracktype and not data.smoothness and not data.mtb_scale then
+      -- Spelled out rather than as `cond and a or b`: that idiom silently falls through to `b` whenever
+      -- `a` is nil, so a profile without medium_speed would hand horse bridleways the very rung they are
+      -- excluded from.
+      local unknown_gravel_speed
+      if data.highway == "bridleway" and not is_cycle_legal_bridleway(way, data) then
+        unknown_gravel_speed = cfg.medium_speed
+      else
+        unknown_gravel_speed = cfg.unknown_gravel_speed or cfg.medium_speed
+      end
       if result.forward_mode ~= mode.inaccessible and result.forward_speed and result.forward_speed > 0 then
-        result.forward_speed = cfg.medium_speed
+        result.forward_speed = math.max(result.forward_speed, unknown_gravel_speed)
       end
       if result.backward_mode ~= mode.inaccessible and result.backward_speed and result.backward_speed > 0 then
-        result.backward_speed = cfg.medium_speed
+        result.backward_speed = math.max(result.backward_speed, unknown_gravel_speed)
       end
     end
 

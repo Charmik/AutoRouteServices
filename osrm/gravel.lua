@@ -7,7 +7,9 @@
 --
 -- Speed model: OSRM weights by duration, so higher speed = preferred route.
 -- GRAVEL_SPEED (45) >> default_speed (10) = gravel surfaces strongly preferred over asphalt.
--- Bare track/path ride at default_speed; a track+surface=gravel rides at GRAVEL_SPEED.
+-- A track+surface=gravel rides at GRAVEL_SPEED. A BARE track/path — no surface, tracktype, smoothness or
+-- mtb:scale — rides at UNKNOWN_GRAVEL_SPEED (20): above every paved rung, below any mapped gravel. So does a
+-- bare bridleway anyone may legally cycle; a bare HORSE bridleway is excluded and stays at MEDIUM_SPEED.
 
 api_version = 4
 
@@ -28,7 +30,7 @@ local VERY_LOW_SPEED = 0.5
 local ROUGH_SPEED    = 10   -- smoothness=very_bad: rideable on a gravel bike, but nothing like a compacted or
                             -- good-smoothness gravel road, so it is demoted to a plain CONNECTOR. Sits exactly
                             -- at the asphalt baseline (default_speed 10) — below a paved track (15) and below
-                            -- an unpaved footway (20), and 4x below GRAVEL_SPEED2 (40), so real gravel always
+                            -- an unpaved footway (25), and 4x below GRAVEL_SPEED2 (40), so real gravel always
                             -- wins the tie and a rough track is ridden only when it genuinely shortcuts.
 local HORRIBLE_SPEED = 5   -- smoothness=horrible: a notch below very_bad (10) and HALF the asphalt baseline,
                             -- so it is ridden only when it shortcuts more sharply still.
@@ -45,11 +47,32 @@ local IMPASSABLE_SPEED = 2  -- smoothness=impassable: the bottom rung, but still
                             -- instead (LeipzigRoutesTest.testHorseRoads). Same reasoning that retuned
                             -- very_bad/horrible off their dead-table values; those two rungs simply were not
                             -- carried down to the bottom of the ladder when the table went live.
-local FOOTWAY_UNPAVED_SPEED = 20  -- unpaved footway (surface=compacted/gravel/dirt): rideable park/greenway
+local FOOTWAY_UNPAVED_SPEED = 25  -- unpaved footway (surface=compacted/gravel/dirt): rideable park/greenway
                                   -- path. Well above asphalt (default_speed) and a paved footway (VERY_LOW)
                                   -- so it competes with a parallel gravel road, but clearly below a real
                                   -- gravel road/track (GRAVEL_SPEED 40) — a footway is still narrow pedestrian
                                   -- infra. Paved footways stay VERY_LOW. Tunable; the dispatch caps here.
+                                  -- Must stay ABOVE UNKNOWN_GRAVEL_SPEED (20): a mapped surface always beats
+                                  -- a way with no surface info. It was 20 — a tie — until the unknown rung
+                                  -- was lifted off MEDIUM_SPEED, which turned the tie into a loss.
+local PEDESTRIAN_UNPAVED_SPEED = 22  -- pedestrian street/plaza with a mapped good gravel surface. Between
+                                  -- UNKNOWN_GRAVEL_SPEED (20) and FOOTWAY_UNPAVED_SPEED (25): a mapped
+                                  -- surface must beat an unmapped way, but pedestrian ways are
+                                  -- pedestrian-PRIORITY, so they stay under a footway greenway and far
+                                  -- under a real gravel road.
+local UNKNOWN_GRAVEL_SPEED = 20  -- a bare track/path with NO surface, tracktype, smoothness or mtb:scale:
+                              -- an "unknown gravel" way (bike_common's rule of the same name). A bare
+                              -- bridleway takes it too when anyone may legally cycle it; a bare HORSE
+                              -- bridleway is excluded there and keeps MEDIUM_SPEED.
+                              -- Its own rung because the rule used to borrow MEDIUM_SPEED, which is pinned
+                              -- to the asphalt base (10) for the sand/grade5 tier — so "ride it ABOVE
+                              -- asphalt so it beats paved connectors" granted nothing, and left it below
+                              -- unclassified (15). 20 restores the documented intent: above every paved
+                              -- rung (asphalt 10, paved track 15) and level with an unpaved footway, yet
+                              -- half of grade4/dirt (40) and well under compacted/grade1-3 (50), so an
+                              -- explicitly-mapped gravel road always out-ranks a merely-untagged track.
+                              -- Matters most where surface tagging is sparse: 2 498 km of track and
+                              -- 2 607 km of path in a Chilterns bbox carry no surface tag at all.
 local PAVED_TRACK_SPEED = 15  -- a PAVED track/path with a tracktype (e.g. asphalt grade1 field/riverside path,
                               -- OSM ways 844496273 / 23547831): a usable connector — above the asphalt base
                               -- (default_speed 10) — but clearly WORSE for a gravel bike than a real unpaved
@@ -68,11 +91,22 @@ local cfg = {
   low_speed      = LOW_SPEED,
   very_low_speed = VERY_LOW_SPEED,
   footway_unpaved_speed = FOOTWAY_UNPAVED_SPEED,
+  pedestrian_unpaved_speed = PEDESTRIAN_UNPAVED_SPEED,
   paved_track_speed = PAVED_TRACK_SPEED,
+  unknown_gravel_speed = UNKNOWN_GRAVEL_SPEED,
 
-  -- Gravel bikes do NOT prefer paved cycleways: no cycleway speed boost (road uses the default x2). A paved
-  -- cycleway keeps its paved base speed (15), a connector below GRAVEL_SPEED (30), never rivalling gravel.
-  cycleway_multiplier = 1,
+  -- How much a PAVED cycle path is worth to a gravel bike (bike_common consults this only on the paved
+  -- branch; an UNPAVED cycleway takes the x2 gravel boost instead). Road uses the default x2.
+  --
+  -- Deliberately a middle rung, not either extreme. It carried the traffic CSV's flat HG1 = 20 km/h until
+  -- recently, which is the BOTTOM of the unpaved band: asphalt cycle paths tied every unpaved way and beat
+  -- the bare ones, and asphalt cycleway became 63 km of every 278 km England loop — 41% of all its paved
+  -- distance. But 1.0 is too far the other way: a segregated cycle path IS nicer to ride than the lane
+  -- beside it, and pricing it identically to a residential street ignores that. 1.25 puts it at ~15 km/h:
+  -- above every paved road rung (asphalt 10, tertiary 5, residential/service ~8-10) and below the
+  -- unknown-gravel rung (20) and everything unpaved above it. So it links gravel without ever competing
+  -- with it — which is exactly what a strip of tarmac should be worth on this profile.
+  cycleway_multiplier = 1.25,
 
   -- Allowed-surface gate. Gravel accepts road surfaces AND gravel-preferred surfaces;
   -- only truly unrideable surfaces are rejected.
@@ -84,10 +118,14 @@ local cfg = {
 
   -- Highway-type speed table. Copied from bicycle.lua with gravel-relevant overrides:
   --   track, path → default_speed (was LOW_SPEED in road; gravel uses them routinely)
-  --   bridleway   → default_speed (added; not present in bicycle.lua)
+  --   bridleway   → VERY_LOW_SPEED (added; not present in bicycle.lua). Horse-priority infra; a
+  --                 bridleway anyone may legally cycle is lifted back out of this by bike_common's
+  --                 is_cycle_legal_bridleway, which is what makes England's rights of way rideable.
   -- GRAVEL_SPEED is reserved for explicit surface=gravel tags via surface_speeds, NOT
-  -- bare highway types, so a bare `track` costs default_speed, `track surface=gravel`
-  -- gets GRAVEL_SPEED via the surface_speeds override in speed_handler.
+  -- bare highway types: `track surface=gravel` gets GRAVEL_SPEED via the surface_speeds
+  -- override in speed_handler. The entries here are only the BASE a way starts from — a
+  -- bare `track`/`path` starts at default_speed and is then lifted to UNKNOWN_GRAVEL_SPEED
+  -- (20) by bike_common's unknown-gravel rung, which a bare HORSE `bridleway` is excluded from.
   bicycle_speeds = {
     motorway        = 0,
     cycleway        = default_speed * 1.2,   -- 2 mil ways
@@ -200,7 +238,10 @@ local cfg = {
   -- end is deliberately NOT done: it would make an explicitly-tagged way slower than an identical untagged one.
   --
   -- Resulting ladder: impassable 2 < very_horrible 3 < horrible 5 < asphalt 10 = very_bad 10
-  --                   < paved track 15 < unpaved footway 20 < grade4/dirt 40 < compacted/grade1-3 50.
+  --                   < paved track 15 < unpaved footway 20 = untagged track/path 20
+  --                   < grade4/dirt 40 < compacted/grade1-3 50.
+  -- Note untagged track/path (20) now sits above very_bad (10): a rough tag is evidence the ground is
+  -- bad, an absent one is only evidence nobody surveyed it — see the rung's note in bike_common.
   -- So a very_bad way is held to the asphalt/connector rung, NOT to a gravel rung: it keeps its place in
   -- the graph but stops competing with real gravel. This is why a grade4 track that also carries
   -- smoothness=very_bad no longer rides at gravel speed — see the GRADE4_CASES note in
