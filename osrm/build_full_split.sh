@@ -3,10 +3,14 @@ set -x
 #sudo apt-get install -y osmium-tool
 
 # Parse arguments
-# $1 (required): part1, part2, or both
+# $1 (required): part1, part2, part3, or both (part3 is gravel-only; both = all parts of the profile)
 # $2 (required): mld or ch - which OSRM algorithm to build
 # $3 (optional): full - when provided, download files and run osmium + ModifyOsmWays
 # --profile road|gravel (required, may appear anywhere): which bike profile to build
+#
+# Part layout:
+#   road   (2 parts): part1 = europe+asia+africa, part2 = north-america+south-america+australia-oceania
+#   gravel (3 parts): part1 = europe+asia, part2 = north-america, part3 = africa+south-america+australia-oceania
 
 #/home/charm/disk/osrm-backend/build/osrm-contract -t 12 planet-part1-modified.osrm --segment-speed-file /home/charm/disk/traffic_dumps/traffic_final_gravel.csv
 #cd ~/data
@@ -33,8 +37,8 @@ done
 set -- "${POSITIONAL[@]}"
 
 if [ -z "$1" ] || [ -z "$2" ] || [ -z "$PROFILE" ]; then
-    echo "Usage: $0 <part1|part2|both> <mld|ch> [full] --profile <road|gravel>"
-    echo "  part1|part2|both - which parts to process (required)"
+    echo "Usage: $0 <part1|part2|part3|both> <mld|ch> [full] --profile <road|gravel>"
+    echo "  part1|part2|part3|both - which parts to process (required; part3 is gravel-only, both = all parts)"
     echo "  mld|ch - OSRM algorithm: mld (partition+customize) or ch (contract) (required)"
     echo "  full - download files and run osmium + ModifyOsmWays (optional)"
     echo "  --profile road|gravel - bike profile to build (required)"
@@ -44,11 +48,6 @@ fi
 PART="$1"
 ALGORITHM="$2"
 FULL_MODE="$3"
-
-if [ "$PART" != "part1" ] && [ "$PART" != "part2" ] && [ "$PART" != "both" ]; then
-    echo "Error: first argument must be 'part1', 'part2', or 'both'"
-    exit 1
-fi
 
 if [ "$ALGORITHM" != "mld" ] && [ "$ALGORITHM" != "ch" ]; then
     echo "Error: second argument must be 'mld' or 'ch'"
@@ -65,21 +64,52 @@ if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
     exit 1
 fi
 
+# road splits the planet in 2 parts, gravel in 3 (gravel graphs are bigger per region,
+# so its parts must be smaller to fit in RAM).
+if [ "$PROFILE" = "gravel" ]; then
+    NUM_PARTS=3
+else
+    NUM_PARTS=2
+fi
+
+if [ "$PART" != "part1" ] && [ "$PART" != "part2" ] && [ "$PART" != "part3" ] && [ "$PART" != "both" ]; then
+    echo "Error: first argument must be 'part1', 'part2', 'part3', or 'both'"
+    exit 1
+fi
+
+if [ "$PART" = "part3" ] && [ "$NUM_PARTS" -lt 3 ]; then
+    echo "Error: part3 only exists for --profile gravel"
+    exit 1
+fi
+
 # Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
 # gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.
+# Per-part arrays are 1-indexed by part number:
+#   PART_REGIONS[i]         - geofabrik files merged into part i (space-separated)
+#   PART_MIN_GB[i]          - min size of the merged pbf
+#   PART_MODIFIED_MIN_GB[i] - min size of the pbf after ModifyOsmWays
+#   PART_MEM[i]             - MemoryMax for osrm-routed
 if [ "$PROFILE" = "gravel" ]; then
     LUA_FILE="gravel.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
     ROUTED_PORT=8004
-    # gravel keeps unpaved ways too, so the graph is bigger: +15G over road
-    PART1_MEM=175G
-    PART2_MEM=85G
+    # gravel keeps unpaved ways too, so graphs are bigger per region than road: the planet
+    # is split in 3 parts instead of 2 so each fits in RAM.
+    PART_REGIONS[1]="europe-latest.osm.pbf asia-latest.osm.pbf"
+    PART_REGIONS[2]="north-america-latest.osm.pbf"
+    PART_REGIONS[3]="africa-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf"
+    PART_MIN_GB=(_ 40 12 8)
+    PART_MODIFIED_MIN_GB=(_ 55 15 10)
+    PART_MEM=(_ 185G 60G 45G)
 else
     LUA_FILE="bicycle.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
     ROUTED_PORT=8003
-    PART1_MEM=160G
-    PART2_MEM=70G
+    PART_REGIONS[1]="europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf"
+    PART_REGIONS[2]="north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf"
+    PART_MIN_GB=(_ 50 20)
+    PART_MODIFIED_MIN_GB=(_ 70 30)
+    PART_MEM=(_ 160G 70G)
 fi
 echo "Building split graph: profile=$PROFILE lua=$LUA_FILE traffic=$TRAFFIC_CSV port=$ROUTED_PORT"
 
@@ -111,14 +141,13 @@ check_pbf_size() {
     echo "OK: $file size check passed (> ${min_gb}GB)"
 }
 
-DO_PART1=false
-DO_PART2=false
-if [ "$PART" = "part1" ] || [ "$PART" = "both" ]; then
-    DO_PART1=true
-fi
-if [ "$PART" = "part2" ] || [ "$PART" = "both" ]; then
-    DO_PART2=true
-fi
+for i in $(seq 1 $NUM_PARTS); do
+    if [ "$PART" = "part${i}" ] || [ "$PART" = "both" ]; then
+        DO_PART[i]=true
+    else
+        DO_PART[i]=false
+    fi
+done
 
 mkdir -p ~/disk
 
@@ -153,15 +182,12 @@ rm -rf "$BASE_DIR"
 mkdir -p "$BASE_DIR"
 cp -r ~/data/AutoRouteServices/osrm "$BASE_DIR/osrm_scripts" # for history - to see which scripts we ran
 
-if [ "$DO_PART1" = true ]; then
-    mkdir -p "$BASE_DIR/part1"
-    cp ~/data/AutoRouteServices/osrm/${LUA_FILE} "$BASE_DIR/part1/"
-fi
-
-if [ "$DO_PART2" = true ]; then
-    mkdir -p "$BASE_DIR/part2"
-    cp ~/data/AutoRouteServices/osrm/${LUA_FILE} "$BASE_DIR/part2/"
-fi
+for i in $(seq 1 $NUM_PARTS); do
+    if [ "${DO_PART[i]}" = true ]; then
+        mkdir -p "$BASE_DIR/part${i}"
+        cp ~/data/AutoRouteServices/osrm/${LUA_FILE} "$BASE_DIR/part${i}/"
+    fi
+done
 
 # Download and process PBF files only in full mode
 if [ "$FULL_MODE" = "full" ]; then
@@ -179,34 +205,26 @@ if [ "$FULL_MODE" = "full" ]; then
     #mkdir ~/disk/traffic_dumps
     #rsync -r --progress charm@88.99.161.250:/home/charm/disk/traffic_dumps/traffic_final_road.csv ~/disk/traffic_dumps/
 
-    if [ "$DO_PART1" = true ]; then
-        echo "Downloading Part 1 regions..."
-        wget -N https://download.geofabrik.de/europe-latest.osm.pbf
-        wget -N https://download.geofabrik.de/asia-latest.osm.pbf
-        wget -N https://download.geofabrik.de/africa-latest.osm.pbf
-
-        echo "Merging Part 1 regions..."
-        osmium merge --overwrite europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf -o ~/disk/planet-part1.osm.pbf || { echo "osmium merge part1 failed"; telegram-send "osmium merge part1 failed $(hostname)"; exit 1; }
-        check_pbf_size ~/disk/planet-part1.osm.pbf 50
-        cd ~/disk/AutoRoute
-        MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part1.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part1 failed $(hostname)"; exit 1; }
-        check_pbf_size ~/disk/planet-part1-modified.osm.pbf 70
-    fi
-
-    if [ "$DO_PART2" = true ]; then
+    for i in $(seq 1 $NUM_PARTS); do
+        if [ "${DO_PART[i]}" != true ]; then
+            continue
+        fi
         cd ~/disk
-        echo "Downloading Part 2 regions..."
-        wget -N https://download.geofabrik.de/north-america-latest.osm.pbf
-        wget -N https://download.geofabrik.de/south-america-latest.osm.pbf
-        wget -N https://download.geofabrik.de/australia-oceania-latest.osm.pbf
+        # intentionally unquoted: PART_REGIONS[i] is a space-separated list
+        REGIONS=(${PART_REGIONS[i]})
 
-        echo "Merging Part 2 regions..."
-        osmium merge --overwrite north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf -o ~/disk/planet-part2.osm.pbf || { echo "osmium merge part2 failed"; telegram-send "osmium merge part2 failed $(hostname)"; exit 1; }
-        check_pbf_size ~/disk/planet-part2.osm.pbf 20
+        echo "Downloading Part ${i} regions: ${REGIONS[*]}"
+        for region in "${REGIONS[@]}"; do
+            wget -N "https://download.geofabrik.de/${region}"
+        done
+
+        echo "Merging Part ${i} regions..."
+        osmium merge --overwrite "${REGIONS[@]}" -o ~/disk/planet-part${i}.osm.pbf || { echo "osmium merge part${i} failed"; telegram-send "osmium merge part${i} failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part${i}.osm.pbf ${PART_MIN_GB[i]}
         cd ~/disk/AutoRoute
-        MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part2.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part2 failed $(hostname)"; exit 1; }
-        check_pbf_size ~/disk/planet-part2-modified.osm.pbf 30
-    fi
+        MAVEN_OPTS="-XX:+UseParallelGC -Xmx150g" mvn exec:java -Dexec.mainClass="com.autoroute.osm.ModifyOsmWays" -Dexec.args="/home/$USER/disk/planet-part${i}.osm.pbf /home/$USER/data/AutoRouteServices/heigit/heygit_ids.txt" || { telegram-send "ModifyOsmWays part${i} failed $(hostname)"; exit 1; }
+        check_pbf_size ~/disk/planet-part${i}-modified.osm.pbf ${PART_MODIFIED_MIN_GB[i]}
+    done
 else
     echo "Skipping download and osmium merge (not in full mode)"
 fi
@@ -267,13 +285,11 @@ process_part() {
     telegram-send "Part ${part_num} $ALGORITHM $PROFILE finished $(hostname)"
 }
 
-if [ "$DO_PART1" = true ]; then
-    process_part 1
-fi
-
-if [ "$DO_PART2" = true ]; then
-    process_part 2
-fi
+for i in $(seq 1 $NUM_PARTS); do
+    if [ "${DO_PART[i]}" = true ]; then
+        process_part ${i}
+    fi
+done
 
 # Calculate execution time
 END_TIME=$(date +%s)
@@ -289,12 +305,11 @@ date
 #telegram-send "Finished osrm split build $PART $ALGORITHM $(hostname)"
 
 echo "Output directory: $BASE_DIR"
-if [ "$DO_PART1" = true ]; then
-    echo "  Processed Part 1: $BASE_DIR/part1"
-fi
-if [ "$DO_PART2" = true ]; then
-    echo "  Processed Part 2: $BASE_DIR/part2"
-fi
+for i in $(seq 1 $NUM_PARTS); do
+    if [ "${DO_PART[i]}" = true ]; then
+        echo "  Processed Part ${i}: $BASE_DIR/part${i}"
+    fi
+done
 
 # Start routing server for a part
 # Usage: start_server <part_number> <port> <memory_max>
@@ -311,9 +326,8 @@ start_server() {
     #systemd-run --user --scope -p MemoryMax=70G -p MemorySwapMax=10 ~/disk/osrm-backend/build/osrm-routed --algorithm CH planet-part2-modified.osrm -p 8003
 }
 
-if [ "$DO_PART1" = true ]; then
-    start_server 1 ${ROUTED_PORT} ${PART1_MEM}
-fi
-if [ "$DO_PART2" = true ]; then
-    start_server 2 ${ROUTED_PORT} ${PART2_MEM}
-fi
+for i in $(seq 1 $NUM_PARTS); do
+    if [ "${DO_PART[i]}" = true ]; then
+        start_server ${i} ${ROUTED_PORT} ${PART_MEM[i]}
+    fi
+done
