@@ -100,7 +100,7 @@ if [ "$PROFILE" = "gravel" ]; then
     PART_REGIONS[3]="africa-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf"
     PART_MIN_GB=(_ 40 12 8)
     PART_MODIFIED_MIN_GB=(_ 55 15 10)
-    PART_MEM=(_ 185G 60G 45G)
+    PART_MEM=(_ 185G 60G 55G)
 else
     LUA_FILE="bicycle.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
