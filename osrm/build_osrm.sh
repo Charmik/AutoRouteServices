@@ -21,7 +21,10 @@ mkdir -p "$OUT_DIR"
 cd "$OUT_DIR" || exit
 rm -rf "$OUT_DIR"/*
 cp "$AUTOROUTE_SERVICES_DIR/osrm/$LUA_FILE" "$GEOFABRIC_DIR"
-cp "$GEOFABRIC_DIR/$LUA_FILE" "$GEOFABRIC_DIR/merged.osm.pbf" "$GEOFABRIC_DIR/traffic_dumps/traffic_final_turns.csv" .
+
+#cp "$GEOFABRIC_DIR/$LUA_FILE" "$GEOFABRIC_DIR/merged.osm.pbf" "$GEOFABRIC_DIR/traffic_dumps/traffic_final_turns.csv" .
+cp "$GEOFABRIC_DIR/$LUA_FILE" "$GEOFABRIC_DIR/merged.osm.pbf" .
+
 # Stage the profile's traffic CSV under its own name, so the build dir shows which profile it came from.
 if [ ! -f "$TRAFFIC_CSV" ]; then echo "ERROR: traffic CSV not found: $TRAFFIC_CSV"; exit 1; fi
 cp "$TRAFFIC_CSV" .
