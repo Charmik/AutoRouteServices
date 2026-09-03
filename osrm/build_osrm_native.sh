@@ -71,7 +71,6 @@ if [ "$FULL" = true ]; then
     rm -rf "$SRC"
     git clone https://github.com/Charmik/osrm-backend.git "$SRC"
     cd "$SRC"
-#    git checkout fix-segfaults-asserts-hacks
     git checkout master_fresh_with_compact_fix
 fi
 
