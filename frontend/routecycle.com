@@ -13,7 +13,34 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy API requests to the backend server over HTTP
+    # Gravel generation goes to the gravel-only backend (hz1), which holds the gravel OSRM
+    # graphs. The frontend sends gravel requests (and every poll/edit for a gravel route) to
+    # /api/gravel/v1/...; strip the /gravel segment so hz1 sees the same /api/v1/... paths.
+    # Longer prefix than /api/v1 and /api, so nginx picks this for gravel URLs.
+    location /api/gravel/v1 {
+        proxy_pass http://144.76.198.221:7070/api/v1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_request_headers on;
+    }
+
+    # Road generation goes to the road backend (hz4). Symmetric with the gravel prefix; strip the
+    # /road segment so hz4 sees the same /api/v1/... paths. The web app targets this path.
+    location /api/road/v1 {
+        proxy_pass http://65.21.136.166:7070/api/v1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_request_headers on;
+    }
+
+    # LEGACY, backward-compatibility only: the un-prefixed road path. Kept so already-shipped clients
+    # (the iOS app, browser tabs holding an older build) keep working after the web app moved to
+    # /api/road/v1.
+    # TODO: drop this /api/v1 block once every client (web + iOS) targets /api/road/v1.
     location /api/v1 {
         proxy_pass http://65.21.136.166:7070/api/v1;
         proxy_set_header Host $host;

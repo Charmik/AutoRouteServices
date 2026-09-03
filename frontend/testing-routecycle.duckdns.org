@@ -13,7 +13,33 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy API requests to the backend server over HTTP
+    # Testing runs a SINGLE backend that serves BOTH graphs, so road and gravel resolve to the same
+    # machine here (unlike prod, where gravel is a separate server). Both prefixes are stripped so the
+    # backend sees /api/v1/...; it then picks road vs gravel from the request's `profile` body field.
+
+    # Gravel — same machine as road on testing.
+    location /api/gravel/v1 {
+        proxy_pass http://88.99.161.250:7070/api/v1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_request_headers on;
+    }
+
+    # Road — the web app's default path.
+    location /api/road/v1 {
+        proxy_pass http://88.99.161.250:7070/api/v1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_request_headers on;
+    }
+
+    # LEGACY, backward-compatibility only: the un-prefixed road path, for clients still on the old
+    # build (iOS app, cached browser tabs).
+    # TODO: drop this /api/v1 block once every client (web + iOS) targets /api/road/v1.
     location /api/v1 {
         proxy_pass http://88.99.161.250:7070/api/v1;
         proxy_set_header Host $host;
