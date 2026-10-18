@@ -103,7 +103,7 @@ local cfg = {
   -- the bare ones, and asphalt cycleway became 63 km of every 278 km England loop — 41% of all its paved
   -- distance. But 1.0 is too far the other way: a segregated cycle path IS nicer to ride than the lane
   -- beside it, and pricing it identically to a residential street ignores that. 1.25 puts it at ~15 km/h:
-  -- above every paved road rung (asphalt 10, tertiary 5, residential/service ~8-10) and below the
+  -- above every paved road rung (asphalt/tertiary 10, residential/service ~8-10) and below the
   -- unknown-gravel rung (20) and everything unpaved above it. So it links gravel without ever competing
   -- with it — which is exactly what a strip of tarmac should be worth on this profile.
   cycleway_multiplier = 1.25,
@@ -137,8 +137,10 @@ local cfg = {
     primary_link    = default_speed / 3,
     secondary       = default_speed,
     secondary_link  = default_speed,
-    tertiary        = default_speed / 2,
-    tertiary_link   = default_speed / 3,
+    tertiary        = default_speed,   -- a quiet tertiary is ordinary riding, like secondary; a busy one
+    tertiary_link   = default_speed,   -- is slowed by the traffic CSV's ALWAYS_LOW+ rungs instead. At
+                                       -- default_speed bike_common's lanes>=2 && maxspeed>=100 rule now
+                                       -- applies to tertiary too (5 km/h), exactly as for secondary.
     residential     = default_speed,
     living_street   = default_speed,
     road            = default_speed,
