@@ -1849,7 +1849,12 @@ function BikeCommon.make_profile(cfg)
       local is_good_cycling_infrastructure = false
 
       if data.highway == "cycleway" then
-        is_good_cycling_infrastructure = true
+        -- Road: an explicitly UNPAVED cycleway is not road-bike infrastructure, so a signed route must not lift
+        -- it: the Pediaios linear-park cycleway in Nicosia (way 202730636, surface=compacted, on EuroVelo 8)
+        -- went from LOW_SPEED 3 to min(default_speed, 3) * 2.8 = 8.4 km/h and the road profile rode it instead
+        -- of the paved streets. A cycleway with no surface tag is still assumed paved. Gravel decides surface
+        -- in its own branch below.
+        is_good_cycling_infrastructure = cfg.profile ~= "road" or not data.surface or is_road_surface(data.surface)
       elseif (data.highway == "track" or data.highway == "residential") and data.surface and is_road_surface(data.surface) then -- https://www.openstreetmap.org/way/340134972 https://www.openstreetmap.org/way/100520383
         if cfg.profile == "gravel" then
           -- Gravel: a cycle-network track/residential is "good infrastructure" ONLY if it is UNPAVED --
@@ -2002,6 +2007,14 @@ function BikeCommon.make_profile(cfg)
           and (data.highway == "track" or data.highway == "path" or data.highway == "bridleway")
       if is_unpaved_surface or is_bare_gravel_way then
         result.highway_turn_classification = 5
+      end
+      -- Gravel: steps get their own turn class (7) so process_turn can charge a FIXED cost for climbing
+      -- onto a flight. Their 0.5 km/h is a cost per metre, so two 16 m flights of a footbridge cost only
+      -- ~4 min and beat riding a busy road (Larnaca A3 footbridge at Kalo Chorio Junction, ways
+      -- 1372597680 / 1372597681). Set after class 5, so a steps way tagged with an unpaved surface is
+      -- still steps.
+      if data.highway == "steps" then
+        result.highway_turn_classification = 7
       end
     end
 
@@ -2175,6 +2188,19 @@ function BikeCommon.make_profile(cfg)
         and turn.source_highway_turn_classification == 5
         and turn.target_highway_turn_classification == 5 then
       turn.duration = math.min(turn.duration, 4)
+    end
+
+    -- Gravel: a fixed cost for getting onto a flight of steps (class 7, see process_way), added after every
+    -- cap above. Carrying the bike up a staircase is an obstacle, not a slow road: per-metre speed alone left
+    -- short flights cheaper than a road detour. A staircase that is the only way through is still allowed.
+    -- Consecutive steps ways (7 -> 7) pay once. 1000 s, not 600: the B5 primary detour around that footbridge
+    -- is itself priced ~3.5 km/h (busy primary), and at 600 the two flights (2066 s) still beat it (2200 s)
+    -- northbound.
+    local STEPS_ENTRY_PENALTY = 1000
+    if cfg.profile == "gravel"
+        and turn.target_highway_turn_classification == 7
+        and turn.source_highway_turn_classification ~= 7 then
+      turn.duration = turn.duration + STEPS_ENTRY_PENALTY
     end
 
   --   if profile.properties.weight_name == 'cyclability' then
