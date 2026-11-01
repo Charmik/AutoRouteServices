@@ -49,7 +49,7 @@ upstream routecycle_road   { server 65.21.136.166:7070; }
 upstream routecycle_gravel { server 144.76.198.221:7070; }
 
 server {
-    server_name routecycle.com www.routecycle.com;
+    server_name routecycle.com;
 
     #root /home/charm/routeplanner/dist;
     root /home/panda/routeplanner/www;
@@ -156,6 +156,18 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/routecycle.com/privkey.pem; # managed by Certbot
     include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+
+# www is only a redirect to the canonical apex; the cert must list both names
+# (certbot certonly --nginx --cert-name routecycle.com -d routecycle.com -d www.routecycle.com).
+server {
+    listen 443 ssl http2;
+    server_name www.routecycle.com;
+    ssl_certificate /etc/letsencrypt/live/routecycle.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/routecycle.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    return 301 https://routecycle.com$request_uri;
 }
 
 server {
