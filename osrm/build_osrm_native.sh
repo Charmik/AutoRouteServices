@@ -60,7 +60,7 @@ fi
 if [ "$OS" = "Linux" ]; then
     SRC=~/disk/osrm-backend
 elif [ "$OS" = "Darwin" ]; then
-    SRC=~/Dropbox/prog/osrm-backend
+    SRC=~/data/osrm-backend
 else
     echo "Unsupported OS: $OS"
     exit 1

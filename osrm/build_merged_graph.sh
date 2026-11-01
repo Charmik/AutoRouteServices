@@ -91,6 +91,16 @@ if [ "$MODE" == "full" ]; then
     echo "Running full download and merge..."
     download_with_retry https://download.geofabrik.de/europe/cyprus-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/russia/northwestern-fed-district-latest.osm.pbf
+    # Sarov (prod route 10507387, RussiaGravelTest) sits in the VOLGA Fed District, not the NORTHWESTERN
+    # one above. The merged graph only needs the ground the request rides, so cut a complete-ways box
+    # ~130 km round Sarov (54.93426, 43.34712) and merge THAT instead of the whole 840 MB district.
+    # complete_ways, not simple: osrm-extract aborts with osmium::not_found if a way is missing any node.
+    if download_with_retry https://download.geofabrik.de/russia/volga-fed-district-latest.osm.pbf; then
+        osmium extract -b 42.3,54.2,44.4,55.7 --strategy=complete_ways --overwrite \
+            -o sarov-region.osm.pbf volga-fed-district-latest.osm.pbf
+        # Merge the box, not the district it came from.
+        DOWNLOADED_FILES=("${DOWNLOADED_FILES[@]/volga-fed-district-latest.osm.pbf/sarov-region.osm.pbf}")
+    fi
     #UK parts
     download_with_retry https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/europe/united-kingdom/scotland-latest.osm.pbf

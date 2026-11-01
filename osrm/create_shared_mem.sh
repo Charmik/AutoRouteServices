@@ -1,29 +1,42 @@
-#cd ~/disk/osrm-backend/build
-#./osrm-datastore --remove-locks
-#./osrm-datastore --spring-clean
-#./osrm-datastore --list
-#./osrm-datastore --dataset-name=planet-latest ~/data/osrm/planet-latest.osrm
-#./osrm-datastore --list
-#./osrm-routed --algorithm mld --shared-memory on --dataset-name planet-latest
+#!/usr/bin/env bash
+# Loads part1/part2 into OSRM shared memory.
+# Old segments are removed first and the load is refused if they are not really gone:
+# ipcrm/--spring-clean only MARK a segment, its RAM stays until the last process detaches,
+# and osrm-datastore allocates the new region before freeing the old one -> two copies -> OOM.
+set -euo pipefail
 
+OSRM_BUILD=~/disk/osrm-backend/build
+NEED_GB=${NEED_GB:-220}   # part1 ~150GiB + part2 ~64GiB (measured 213GiB) + margin
 
-cd ~/disk/osrm-backend/build
+cd "$OSRM_BUILD"
+
+if pgrep -x osrm-datastore >/dev/null || pgrep -x osrm-routed >/dev/null; then
+  echo "osrm-datastore/osrm-routed is running, stop it first:"; pgrep -a 'osrm-(datastore|routed)'; exit 1
+fi
+
+# Remove every segment of this user directly (--spring-clean silently aborts unless you type 'Y')
+for id in $(ipcs -m | awk -v u="$USER" '$3==u {print $2}'); do ipcrm -m "$id"; done
 ./osrm-datastore --remove-locks
-./osrm-datastore --spring-clean
+
+if [ -n "$(ipcs -m | awk -v u="$USER" '$3==u')" ]; then
+  echo "Old shared memory is still held (status 'dest' = attached by the process in lpid/cpid):"
+  ipcs -m; ipcs -m -p; exit 1
+fi
+
+avail_gb=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)
+if [ "$avail_gb" -lt "$NEED_GB" ]; then
+  echo "Only ${avail_gb}GiB available, need ${NEED_GB}GiB (override with NEED_GB=...)"; free -h; exit 1
+fi
+
+./osrm-datastore --dataset-name=part1 /home/charm/data/osrm/part1/planet-part1-modified
+./osrm-datastore --dataset-name=part2 /home/charm/data/osrm/part2/planet-part2-modified
 ./osrm-datastore --list
 ipcs -m
 free -h
-./osrm-datastore --dataset-name=part1 /home/charm/data/osrm/part1/planet-part1-modified --disable-feature-dataset ROUTE_STEPS
-./osrm-datastore --dataset-name=part2 /home/charm/data/osrm/part2/planet-part2-modified --disable-feature-dataset ROUTE_STEPS
-./osrm-datastore --list
-./osrm-routed --algorithm ch --shared-memory on --dataset-name part1
-./osrm-routed --algorithm ch --shared-memory on --dataset-name part2
 
-
-# CLEAR SHARED MEMORY
-#ipcs -m #check shmid ids here
-#ipcrm -m 15
-#ipcrm -m 16
+# Debug only (never used by the app):
+#./osrm-routed --algorithm ch --shared-memory on --dataset-name part1
+#./osrm-routed --algorithm ch --shared-memory on --dataset-name part2
 
 
 # check shared-memory files

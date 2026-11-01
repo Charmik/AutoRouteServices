@@ -166,7 +166,6 @@ if [ ! -d "osrm-backend/build" ]; then
     rm -rf osrm-backend
     git clone https://github.com/Charmik/osrm-backend.git
     cd ~/disk/osrm-backend
-#    git checkout fix-segfaults-asserts-hacks
     git checkout master_fresh_with_compact_fix
     mkdir -p build
     cd ~/disk/osrm-backend/build
