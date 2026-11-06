@@ -48,6 +48,14 @@ upstream routecycle_road   { server 65.21.136.166:7070; }
 # which looked like an application bug instead of an undeployed backend.
 upstream routecycle_gravel { server 144.76.198.221:7070; }
 
+# iOS 1.0.0 (33) sends lang=ru, but Photon only accepts default, de, en, fr and answers 400.
+# Swap just that parameter and leave the rest of the query, q included, byte for byte as sent.
+# Remove once 1.0.0 is gone.
+map $args $photon_args {
+    default $args;
+    "~^(?<photon_args_pre>(.*&)?)lang=ru(?<photon_args_post>(&.*)?)$" "${photon_args_pre}lang=default${photon_args_post}";
+}
+
 server {
     server_name routecycle.com;
 
@@ -135,6 +143,7 @@ server {
     # exactly how the Sep 8 2026 outage presented -- the deployed web build asked for
     # /api/road/v1/... before this file had that block.
     location /api {
+        set $args $photon_args;
         proxy_pass http://176.9.23.116:2322/api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
