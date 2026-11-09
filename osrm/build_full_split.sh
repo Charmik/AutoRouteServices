@@ -37,11 +37,11 @@ done
 set -- "${POSITIONAL[@]}"
 
 if [ -z "$1" ] || [ -z "$2" ] || [ -z "$PROFILE" ]; then
-    echo "Usage: $0 <part1|part2|part3|both> <mld|ch> [full] --profile <road|gravel>"
-    echo "  part1|part2|part3|both - which parts to process (required; part3 is gravel-only, both = all parts)"
+    echo "Usage: $0 <part1|part2|part3|both> <mld|ch> [full] --profile <road|gravel|walk>"
+    echo "  part1|part2|part3|both - which parts to process (required; part3 is gravel/walk only, both = all parts)"
     echo "  mld|ch - OSRM algorithm: mld (partition+customize) or ch (contract) (required)"
     echo "  full - download files and run osmium + ModifyOsmWays (optional)"
-    echo "  --profile road|gravel - bike profile to build (required)"
+    echo "  --profile road|gravel|walk - profile to build (required)"
     exit 1
 fi
 
@@ -59,14 +59,14 @@ if [ -n "$FULL_MODE" ] && [ "$FULL_MODE" != "full" ]; then
     exit 1
 fi
 
-if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
-    echo "Error: --profile must be 'road' or 'gravel'"
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ] && [ "$PROFILE" != "walk" ]; then
+    echo "Error: --profile must be 'road', 'gravel' or 'walk'"
     exit 1
 fi
 
-# road splits the planet in 2 parts, gravel in 3 (gravel graphs are bigger per region,
-# so its parts must be smaller to fit in RAM).
-if [ "$PROFILE" = "gravel" ]; then
+# road splits the planet in 2 parts, gravel and walk in 3 (their graphs keep paths/footways, so they are
+# bigger per region and the parts must be smaller to fit in RAM).
+if [ "$PROFILE" = "gravel" ] || [ "$PROFILE" = "walk" ]; then
     NUM_PARTS=3
 else
     NUM_PARTS=2
@@ -78,7 +78,7 @@ if [ "$PART" != "part1" ] && [ "$PART" != "part2" ] && [ "$PART" != "part3" ] &&
 fi
 
 if [ "$PART" = "part3" ] && [ "$NUM_PARTS" -lt 3 ]; then
-    echo "Error: part3 only exists for --profile gravel"
+    echo "Error: part3 only exists for --profile gravel or walk"
     exit 1
 fi
 
@@ -89,7 +89,19 @@ fi
 #   PART_MIN_GB[i]          - min size of the merged pbf
 #   PART_MODIFIED_MIN_GB[i] - min size of the pbf after ModifyOsmWays
 #   PART_MEM[i]             - MemoryMax for osrm-routed
-if [ "$PROFILE" = "gravel" ]; then
+if [ "$PROFILE" = "walk" ]; then
+    LUA_FILE="foot.lua"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_walk.csv"
+    ROUTED_PORT=8009
+    # The gravel 3-part layout and sizes: the foot graph also keeps footways/paths. Never built on the planet yet,
+    # so the sizes and memory limits are unverified guesses (planet walk hosting is still an open question).
+    PART_REGIONS[1]="europe-latest.osm.pbf asia-latest.osm.pbf"
+    PART_REGIONS[2]="north-america-latest.osm.pbf"
+    PART_REGIONS[3]="africa-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf"
+    PART_MIN_GB=(_ 40 12 8)
+    PART_MODIFIED_MIN_GB=(_ 55 15 10)
+    PART_MEM=(_ 185G 60G 55G)
+elif [ "$PROFILE" = "gravel" ]; then
     LUA_FILE="gravel.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
     ROUTED_PORT=8004

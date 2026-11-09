@@ -1,8 +1,10 @@
 set -x
 
-# Copy both profile graphs built by build_merged_graph.sh (osrm_merged_road / osrm_merged_gravel).
-for PROFILE in road gravel; do
+# Copy the profile graphs built by build_merged_graph.sh (osrm_merged_road / _gravel / _walk); walk is skipped until it
+# has been built, because it is not hosted yet.
+for PROFILE in road gravel walk; do
     BUILD_DIR="osrm_merged_${PROFILE}"
+    if [ "$PROFILE" = "walk" ] && [ ! -d ~/disk/share/${BUILD_DIR} ]; then echo "skip ${BUILD_DIR}: not built"; continue; fi
     rm -rf ~/data/osrm_for_CI_${PROFILE}
     cp -r ~/disk/share/${BUILD_DIR} ~/data/osrm_for_CI_${PROFILE}
 done

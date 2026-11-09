@@ -1,7 +1,16 @@
 set -x
 PROFILE="road"
 if [ "$1" = "--profile" ]; then PROFILE="$2"; fi
-if [ "$PROFILE" = "gravel" ]; then
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ] && [ "$PROFILE" != "walk" ]; then
+  echo "ERROR: unknown profile '$PROFILE' (road|gravel|walk)"
+  exit 1
+fi
+if [ "$PROFILE" = "walk" ]; then
+  LUA_FILE="foot.lua"
+  OUT_DIR="${OSRM_WALK_DATA_DIR:-$HOME/data/osrm_walk}"
+  # Walk preferences (foot heatmap, parks, water, big roads) come as *x / /x multipliers in traffic_dump_walk.csv
+  # from the same TrafficDumpCsvTask run (-> traffic_final_walk.csv).
+elif [ "$PROFILE" = "gravel" ]; then
   LUA_FILE="gravel.lua"
   OUT_DIR="${OSRM_GRAVEL_DATA_DIR:-$HOME/data/osrm_gravel}"
   # Gravel uses the surface-aware traffic CSV (no asphalt popularity boost). Produced by the same
@@ -14,7 +23,7 @@ else
   fi
   OUT_DIR="$OSRM_DATA_DIR"
 fi
-# Every traffic CSV is profile-suffixed: traffic_final_road.csv / traffic_final_gravel.csv.
+# Every traffic CSV is profile-suffixed: traffic_final_road.csv / traffic_final_gravel.csv / traffic_final_walk.csv.
 TRAFFIC_CSV_NAME="traffic_final_${PROFILE}.csv"
 TRAFFIC_CSV="$GEOFABRIC_DIR/traffic_dumps/$TRAFFIC_CSV_NAME"
 mkdir -p "$OUT_DIR"
