@@ -11,8 +11,8 @@ fi
 
 HOSTNAME=$(hostname)
 
-# Parse args: `full` (optional) triggers download+merge; `--profile road|gravel` (required)
-# selects the bike profile. They may appear in any order.
+# Parse args: `full` (optional) triggers download+merge; `--profile road|gravel|walk` (required)
+# selects the profile. They may appear in any order.
 PROFILE=""
 MODE=""
 while [ $# -gt 0 ]; do
@@ -23,16 +23,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
-    echo "Usage: $0 [full] --profile <road|gravel>"
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ] && [ "$PROFILE" != "walk" ]; then
+    echo "Usage: $0 [full] --profile <road|gravel|walk>"
     echo "  full - download regions and merge them (optional)"
-    echo "  --profile road|gravel - bike profile to build (required)"
+    echo "  --profile road|gravel|walk - profile to build (required)"
     exit 1
 fi
 
 # Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
-# gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.
-if [ "$PROFILE" = "gravel" ]; then
+# gravel uses the surface-aware CSV and gravel.lua; walk uses foot.lua and the walk preference CSV.
+# Separate output dirs so the graphs can coexist.
+if [ "$PROFILE" = "walk" ]; then
+    LUA_FILE="foot.lua"
+    BUILD_DIR="osrm_merged_walk"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_walk.csv"
+    ROUTED_PORT=8008
+elif [ "$PROFILE" = "gravel" ]; then
     LUA_FILE="gravel.lua"
     BUILD_DIR="osrm_merged_gravel"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
