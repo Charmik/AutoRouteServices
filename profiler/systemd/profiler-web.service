@@ -1,0 +1,17 @@
+[Unit]
+Description=Profiler flamegraph web server (basic auth)
+After=network.target
+
+[Service]
+Type=simple
+User=charm
+Environment=PROFILER_DIR=/home/charm/disk/profiler/data
+Environment=PROFILER_PORT=8400
+# PROFILER_USER / PROFILER_PASS come from this file (chmod 600):
+EnvironmentFile=/home/charm/disk/profiler/web.env
+ExecStart=/usr/bin/python3 /home/charm/data/AutoRouteServices/profiler/bin/auth_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

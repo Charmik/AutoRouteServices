@@ -1,0 +1,20 @@
+[Unit]
+Description=Continuous async-profiler (wall) for AutoRoute
+After=network.target
+
+[Service]
+Type=simple
+User=charm
+# Code lives in the rsynced repo; output goes to the big disk via PROFILER_HOME.
+Environment=PROFILER_HOME=/home/charm/disk/profiler
+ExecStart=/home/charm/data/AutoRouteServices/profiler/bin/profile-loop.sh
+Restart=always
+RestartSec=10
+# Optional overrides:
+# Environment=DURATION=60
+# Environment=EVENT=wall
+# Environment=JVM_PATTERN=AutoRoute.jar
+# Environment=AP_HOME=/home/charm/disk/async-profiler
+
+[Install]
+WantedBy=multi-user.target
