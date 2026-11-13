@@ -1,7 +1,7 @@
 -- Foot profile for RouteCycle walking / running routes (graph ~/data/osrm_walk).
 --
 -- Upstream osrm-backend profiles/foot.lua with these changes (marked RouteCycle below):
---   * highway=cycleway is walkable, unless foot=no: slower, except with explicit foot access;
+--   * highway=cycleway is walkable, unless foot=no: slower, except with foot=designated;
 --   * highway=steps are walkable but slow;
 --   * primary bridges and tunnels without a sidewalk are not walkable (a trunk is unroutable without
 --     explicit foot access anyway, as upstream);
@@ -215,15 +215,18 @@ local function handle_sidewalk_separate(profile, way, result, data)
   end
 end
 
--- RouteCycle: a cycleway with explicit foot access (foot=designated) is a real foot path, so it keeps the full speed.
+-- RouteCycle: a cycleway designated for walkers (foot=designated) is a real foot path, so it keeps the full speed.
+-- foot=yes / permissive only allow walking: it stays at the slower cycleway speed, so a parallel sidewalk wins.
+-- (Limassol Coastal Road Cycling Lane, way 27452366, foot=yes: at full speed it tied with sidewalk 300837624
+-- beside it and walks went down the cycle lane.)
 local function handle_cycleway_with_foot_access(profile, way, result, data)
   if data.highway ~= 'cycleway' then
     return
   end
-  if profile.access_tag_whitelist[data.forward_access] then
+  if data.forward_access == 'designated' then
     result.forward_speed = profile.default_speed
   end
-  if profile.access_tag_whitelist[data.backward_access] then
+  if data.backward_access == 'designated' then
     result.backward_speed = profile.default_speed
   end
 end
@@ -325,7 +328,7 @@ function process_way(profile, way, result)
     -- compute speed taking into account way type, maxspeed tags, etc.
     WayHandlers.speed,
 
-    -- RouteCycle: cycleways with explicit foot access keep the full speed
+    -- RouteCycle: cycleways with foot=designated keep the full speed
     handle_cycleway_with_foot_access,
     WayHandlers.surface,
 

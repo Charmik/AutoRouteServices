@@ -23,16 +23,28 @@ else
   fi
   OUT_DIR="$OSRM_DATA_DIR"
 fi
+# Leave half the cores free while World of Warcraft is running, so the game stays playable.
+NPROC="$(getconf _NPROCESSORS_ONLN)"
+THREADS="$NPROC"
+if pgrep -f "World of Warcraft" >/dev/null 2>&1; then
+  THREADS=$(( NPROC / 2 ))
+  [ "$THREADS" -lt 1 ] && THREADS=1
+  echo "World of Warcraft is running - limiting OSRM to $THREADS of $NPROC threads"
+fi
+
 # Every traffic CSV is profile-suffixed: traffic_final_road.csv / traffic_final_gravel.csv / traffic_final_walk.csv.
 TRAFFIC_CSV_NAME="traffic_final_${PROFILE}.csv"
 TRAFFIC_CSV="$GEOFABRIC_DIR/traffic_dumps/$TRAFFIC_CSV_NAME"
+# Where merged.osm.pbf lives (written by `mm`). An AutoRoute worktree points this at its own dir so its
+# merge never clobbers the main tree's; everywhere else it is $GEOFABRIC_DIR, as before.
+MERGE_DIR="${OSRM_MERGE_DIR:-$GEOFABRIC_DIR}"
 mkdir -p "$OUT_DIR"
 cd "$OUT_DIR" || exit
 rm -rf "$OUT_DIR"/*
-cp "$AUTOROUTE_SERVICES_DIR/osrm/$LUA_FILE" "$GEOFABRIC_DIR"
+cp "$AUTOROUTE_SERVICES_DIR/osrm/$LUA_FILE" "$MERGE_DIR"
 
 #cp "$GEOFABRIC_DIR/$LUA_FILE" "$GEOFABRIC_DIR/merged.osm.pbf" "$GEOFABRIC_DIR/traffic_dumps/traffic_final_turns.csv" .
-cp "$GEOFABRIC_DIR/$LUA_FILE" "$GEOFABRIC_DIR/merged.osm.pbf" .
+cp "$MERGE_DIR/$LUA_FILE" "$MERGE_DIR/merged.osm.pbf" .
 
 # Stage the profile's traffic CSV under its own name, so the build dir shows which profile it came from.
 if [ ! -f "$TRAFFIC_CSV" ]; then echo "ERROR: traffic CSV not found: $TRAFFIC_CSV"; exit 1; fi
@@ -44,11 +56,11 @@ cp -r "$OSRM_SOURCES/profiles/lib" .
 cp "$AUTOROUTE_SERVICES_DIR/osrm/lib/bike_common.lua" lib/
 cp "$OSRM_SOURCES/data/driving_side.geojson" .
 
-"$OSRM_SOURCES/build/osrm-extract" --location-dependent-data driving_side.geojson -p "$LUA_FILE" merged.osm.pbf || echo "osrm-extract failed"
-"$OSRM_SOURCES/build/osrm-partition" merged.osrm || echo "osrm-partition failed"
+"$OSRM_SOURCES/build/osrm-extract" -t "$THREADS" --location-dependent-data driving_side.geojson -p "$LUA_FILE" merged.osm.pbf || echo "osrm-extract failed"
+"$OSRM_SOURCES/build/osrm-partition" -t "$THREADS" merged.osrm || echo "osrm-partition failed"
 CUSTOMIZE_ARGS="--segment-speed-file $TRAFFIC_CSV_NAME"
 #if [ -f traffic_final_turns.csv ]; then
 #    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file traffic_final_turns.csv"
 #fi
-"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file "$TRAFFIC_CSV_NAME" || echo "osrm-customize failed"
+"$OSRM_SOURCES/build/osrm-customize" -t "$THREADS" merged.osrm --segment-speed-file "$TRAFFIC_CSV_NAME" || echo "osrm-customize failed"
 #"$OSRM_SOURCES/build/osrm-customize" merged.osrm --segment-speed-file "$TRAFFIC_CSV_NAME" --turn-penalty-file traffic_final_turns.csv || echo "osrm-customize failed"

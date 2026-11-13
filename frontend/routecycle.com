@@ -56,6 +56,10 @@ map $args $photon_args {
     "~^(?<photon_args_pre>(.*&)?)lang=ru(?<photon_args_post>(&.*)?)$" "${photon_args_pre}lang=default${photon_args_post}";
 }
 
+# Walk (walking/running) generation -- the box holding the walk OSRM graph. NOT CHOSEN YET (docs/WALK_PLAN.md
+# "Open"), so this and the /api/walk/v1 location below stay commented out: uncomment both with the walk host.
+# upstream routecycle_walk { server WALK_HOST:7070; }
+
 server {
     server_name routecycle.com;
 
@@ -116,6 +120,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_pass_request_headers on;
     }
+
+    # Walk: the walk host runs the same JAR with routing.service.osrm.data.profile=walk (app-prod-walk.properties).
+    # location /api/walk/v1 {
+    #     proxy_pass http://routecycle_walk/api/v1;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    #     proxy_pass_request_headers on;
+    # }
 
     # The profile-neutral API: everything user-scoped, plus legacy un-prefixed clients.
     # NOT legacy and NOT safe to delete -- the web app's VITE_BACKEND_API_URL points here, so
