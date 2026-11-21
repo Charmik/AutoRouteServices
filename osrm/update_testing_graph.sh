@@ -2,9 +2,9 @@ set -x
 
 apt install osmium-tool
 
-# build_merged_graph.sh --profile road|gravel publishes to ~/disk/share/osrm_merged_<profile>;
+# build_merged_graph.sh --profile road|gravel|walk publishes to ~/disk/share/osrm_merged_<profile>;
 # app-testing.properties reads them from ~/data/osrm_merged_<profile>/merged.
-for BUILD_DIR in osrm_merged_road osrm_merged_gravel; do
+for BUILD_DIR in osrm_merged_road osrm_merged_gravel osrm_merged_walk; do
     rm -rf ~/data/${BUILD_DIR}
     cp -r ~/disk/share/${BUILD_DIR} ~/data/${BUILD_DIR}
 done

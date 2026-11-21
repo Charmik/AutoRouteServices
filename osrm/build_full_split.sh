@@ -3,23 +3,26 @@ set -x
 #sudo apt-get install -y osmium-tool
 
 # Parse arguments
-# $1 (required): part1, part2, part3, or both (part3 is gravel-only; both = all parts of the profile)
+# $1 (required): part1, part2, part3, or both (both = all 3 parts of the profile)
 # $2 (required): mld or ch - which OSRM algorithm to build
 # $3 (optional): full - when provided, download files and run osmium + ModifyOsmWays
 # --profile road|gravel (required, may appear anywhere): which bike profile to build
 #
-# Part layout:
-#   road   (2 parts): part1 = europe+asia+africa, part2 = north-america+south-america+australia-oceania
-#   gravel (3 parts): part1 = europe+asia, part2 = north-america, part3 = africa+south-america+australia-oceania
+# Part layout (both profiles have 3 parts, but NOT the same geography - the backend maps
+# continents to parts per profile: RoadPart / GravelPart in AutoRoute routing/osrm/geo):
+#   road  : part1 = europe+asia, part2 = north-america+south-america+australia-oceania, part3 = africa
+#   gravel: part1 = europe+asia, part2 = north-america, part3 = africa+south-america+australia-oceania
+# Prod serves part1+part2 from shared memory (create_shared_mem.sh) and part3 with --mmap.
+# Rebuild all parts together ("both"): parts of different layouts don't fit together.
 
 #/home/charm/disk/osrm-backend/build/osrm-contract -t 12 planet-part1-modified.osrm --segment-speed-file /home/charm/disk/traffic_dumps/traffic_final_gravel.csv
 #cd ~/data
-#sudo swapoff -a
-#rm -f swap
-#sudo fallocate -l 750G swap # 256RAM + 440 is not enough for extract
-#sudo chmod 600 swap
-#sudo mkswap swap
-#sudo swapon swap
+sudo swapoff -a
+rm -f swap
+sudo fallocate -l 150G swap # 256RAM + 440 is not enough for extract
+sudo chmod 600 swap
+sudo mkswap swap
+sudo swapon swap
 #echo '/home/remote1/disk/swap none swap sw 0 0' | sudo tee -a /etc/fstab
 #sudo swapon -p 32767 swap
 #sudo swapon -p 1 swap
@@ -38,7 +41,7 @@ set -- "${POSITIONAL[@]}"
 
 if [ -z "$1" ] || [ -z "$2" ] || [ -z "$PROFILE" ]; then
     echo "Usage: $0 <part1|part2|part3|both> <mld|ch> [full] --profile <road|gravel>"
-    echo "  part1|part2|part3|both - which parts to process (required; part3 is gravel-only, both = all parts)"
+    echo "  part1|part2|part3|both - which parts to process (required; both = all 3 parts)"
     echo "  mld|ch - OSRM algorithm: mld (partition+customize) or ch (contract) (required)"
     echo "  full - download files and run osmium + ModifyOsmWays (optional)"
     echo "  --profile road|gravel - bike profile to build (required)"
@@ -64,21 +67,11 @@ if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
     exit 1
 fi
 
-# road splits the planet in 2 parts, gravel in 3 (gravel graphs are bigger per region,
-# so its parts must be smaller to fit in RAM).
-if [ "$PROFILE" = "gravel" ]; then
-    NUM_PARTS=3
-else
-    NUM_PARTS=2
-fi
+# Both profiles split the planet in 3 parts (layouts differ, see PART_REGIONS below).
+NUM_PARTS=3
 
 if [ "$PART" != "part1" ] && [ "$PART" != "part2" ] && [ "$PART" != "part3" ] && [ "$PART" != "both" ]; then
     echo "Error: first argument must be 'part1', 'part2', 'part3', or 'both'"
-    exit 1
-fi
-
-if [ "$PART" = "part3" ] && [ "$NUM_PARTS" -lt 3 ]; then
-    echo "Error: part3 only exists for --profile gravel"
     exit 1
 fi
 
@@ -105,11 +98,16 @@ else
     LUA_FILE="bicycle.lua"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_road.csv"
     ROUTED_PORT=8003
-    PART_REGIONS[1]="europe-latest.osm.pbf asia-latest.osm.pbf africa-latest.osm.pbf"
+    # africa is its own part3: few users there, so prod (hz4) serves it with --mmap instead of
+    # shared memory and part1+part2 keep the RAM. Note geofabrik africa includes the Canary Islands.
+    PART_REGIONS[1]="europe-latest.osm.pbf asia-latest.osm.pbf"
     PART_REGIONS[2]="north-america-latest.osm.pbf south-america-latest.osm.pbf australia-oceania-latest.osm.pbf"
-    PART_MIN_GB=(_ 50 20)
-    PART_MODIFIED_MIN_GB=(_ 70 30)
-    PART_MEM=(_ 160G 70G)
+    PART_REGIONS[3]="africa-latest.osm.pbf"
+    # part1 is the same merged pbf as gravel part1, so the same thresholds. part3 thresholds are a guess
+    # (africa-latest is ~7GB) - not measured yet, adjust after the first build.
+    PART_MIN_GB=(_ 40 20 5)
+    PART_MODIFIED_MIN_GB=(_ 55 30 6)
+    PART_MEM=(_ 160G 70G 40G)
 fi
 echo "Building split graph: profile=$PROFILE lua=$LUA_FILE traffic=$TRAFFIC_CSV port=$ROUTED_PORT"
 

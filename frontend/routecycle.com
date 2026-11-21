@@ -56,6 +56,10 @@ map $args $photon_args {
     "~^(?<photon_args_pre>(.*&)?)lang=ru(?<photon_args_post>(&.*)?)$" "${photon_args_pre}lang=default${photon_args_post}";
 }
 
+# Walk (walking/running) generation -- the box holding the walk OSRM graph. NOT CHOSEN YET (docs/WALK_PLAN.md
+# "Open"), so this and the /api/walk/v1 location below stay commented out: uncomment both with the walk host.
+# upstream routecycle_walk { server WALK_HOST:7070; }
+
 server {
     server_name routecycle.com;
 
@@ -109,6 +113,12 @@ server {
 
     # Gravel is served by hz1, which runs the same JAR and so registers the same /api/v1 paths.
     location /api/gravel/v1 {
+        # GPX upload (POST importGpx) carries the file as the body: a 1 Hz recording of a long ride is
+        # several MB, past nginx's 1 MB default. The backend caps it at 20 MB itself.
+        client_max_body_size 20m;
+        # The upload is answered in one synchronous request (snapping + tile loads, which may build an uncached
+        # tile from Overpass): give it longer than nginx's 60 s, or the rider sees a failure for a saved route.
+        proxy_read_timeout 180s;
         proxy_pass http://routecycle_gravel/api/v1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -116,6 +126,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_pass_request_headers on;
     }
+
+    # Walk: the walk host runs the same JAR with routing.service.osrm.data.profile=walk (app-prod-walk.properties).
+    # location /api/walk/v1 {
+    #     proxy_pass http://routecycle_walk/api/v1;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    #     proxy_pass_request_headers on;
+    # }
 
     # The profile-neutral API: everything user-scoped, plus legacy un-prefixed clients.
     # NOT legacy and NOT safe to delete -- the web app's VITE_BACKEND_API_URL points here, so

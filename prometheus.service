@@ -7,7 +7,7 @@ After=network-online.target
 Type=simple
 User=charm
 Group=charm
-ExecStart=/home/charm/disk/prometheus-3.5.4.linux-amd64/prometheus --config.file=/home/charm/disk/prometheus-3.5.4.linux-amd64/prometheus.yml --web.enable-admin-api
+ExecStart=/home/charm/disk/prometheus-3.5.4.linux-amd64/prometheus --config.file=/home/charm/disk/prometheus-3.5.4.linux-amd64/prometheus.yml --web.config.file=/home/charm/disk/prometheus-3.5.4.linux-amd64/web.yml
 WorkingDirectory=/home/charm/disk/prometheus-3.5.4.linux-amd64
 Restart=on-failure
 RestartSec=5

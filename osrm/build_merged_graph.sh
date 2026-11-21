@@ -11,8 +11,8 @@ fi
 
 HOSTNAME=$(hostname)
 
-# Parse args: `full` (optional) triggers download+merge; `--profile road|gravel` (required)
-# selects the bike profile. They may appear in any order.
+# Parse args: `full` (optional) triggers download+merge; `--profile road|gravel|walk` (required)
+# selects the profile. They may appear in any order.
 PROFILE=""
 MODE=""
 while [ $# -gt 0 ]; do
@@ -23,16 +23,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ]; then
-    echo "Usage: $0 [full] --profile <road|gravel>"
+if [ "$PROFILE" != "road" ] && [ "$PROFILE" != "gravel" ] && [ "$PROFILE" != "walk" ]; then
+    echo "Usage: $0 [full] --profile <road|gravel|walk>"
     echo "  full - download regions and merge them (optional)"
-    echo "  --profile road|gravel - bike profile to build (required)"
+    echo "  --profile road|gravel|walk - profile to build (required)"
     exit 1
 fi
 
 # Profile-specific inputs/outputs. Road uses the asphalt-popularity traffic CSV and bicycle.lua;
-# gravel uses the surface-aware CSV and gravel.lua. Separate output dirs so both graphs can coexist.
-if [ "$PROFILE" = "gravel" ]; then
+# gravel uses the surface-aware CSV and gravel.lua; walk uses foot.lua and the walk preference CSV.
+# Separate output dirs so the graphs can coexist.
+if [ "$PROFILE" = "walk" ]; then
+    LUA_FILE="foot.lua"
+    BUILD_DIR="osrm_merged_walk"
+    TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_walk.csv"
+    ROUTED_PORT=8008
+elif [ "$PROFILE" = "gravel" ]; then
     LUA_FILE="gravel.lua"
     BUILD_DIR="osrm_merged_gravel"
     TRAFFIC_CSV="$HOME/disk/traffic_dumps/traffic_final_gravel.csv"
@@ -112,6 +118,8 @@ if [ "$MODE" == "full" ]; then
     download_with_retry https://download.geofabrik.de/europe/spain/cataluna-latest.osm.pbf
     ##Germany
     download_with_retry https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf #Berlin
+    download_with_retry https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf #around Berlin
+    download_with_retry https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf
     download_with_retry https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf #Munich
     download_with_retry https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf #Leipzig1
     download_with_retry https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf #Leipzig2
@@ -163,14 +171,19 @@ cp ~/disk/osrm-backend/data/driving_side.geojson .
 
 
 ~/disk/osrm-backend/build/osrm-extract --location-dependent-data driving_side.geojson -p ${LUA_FILE} merged.osm.pbf || echo "osrm-extract failed"
-~/disk/osrm-backend/build/osrm-partition merged.osrm || echo "osrm-partition failed"
-
 if [ ! -f "$TRAFFIC_CSV" ]; then echo "ERROR: traffic CSV not found: $TRAFFIC_CSV"; exit 1; fi
-CUSTOMIZE_ARGS="--segment-speed-file $TRAFFIC_CSV"
-#if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
-#    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
-#fi
-~/disk/osrm-backend/build/osrm-customize merged.osrm $CUSTOMIZE_ARGS || echo "osrm-customize failed"
+
+# MLD (partition + customize) - replaced by CH below: CH routes ~1.6-1.8x faster per JNI call
+# (reports/osrm-jni-ffm/README.md). OsrmLib auto-detects the algorithm from the graph files.
+#~/disk/osrm-backend/build/osrm-partition merged.osrm || echo "osrm-partition failed"
+#CUSTOMIZE_ARGS="--segment-speed-file $TRAFFIC_CSV"
+##if [ -f ~/disk/traffic_dumps/traffic_final_turns.csv ]; then
+##    CUSTOMIZE_ARGS="$CUSTOMIZE_ARGS --turn-penalty-file $HOME/disk/traffic_dumps/traffic_final_turns.csv"
+##fi
+#~/disk/osrm-backend/build/osrm-customize merged.osrm $CUSTOMIZE_ARGS || echo "osrm-customize failed"
+
+# CH: the traffic CSV is applied at contract time.
+~/disk/osrm-backend/build/osrm-contract -t $(nproc) merged.osrm --segment-speed-file "$TRAFFIC_CSV" || echo "osrm-contract failed"
 
 rm *.pbf
 rm *.osrm.ebg *.osrm.cnbg *.osrm.cnbg_to_ebg *.osrm.enw *.osrm.turn_penalties_index *.osrm.restrictions

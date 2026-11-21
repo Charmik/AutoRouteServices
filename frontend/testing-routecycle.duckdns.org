@@ -68,6 +68,12 @@ server {
     # Gravel generation. On staging the same backend serves both graphs and picks by the request's
     # `profile` field, so this points at hz2 like everything else.
     location /api/gravel/v1 {
+        # GPX upload (POST importGpx) carries the file as the body: a 1 Hz recording of a long ride is
+        # several MB, past nginx's 1 MB default. The backend caps it at 20 MB itself.
+        client_max_body_size 20m;
+        # The upload is answered in one synchronous request (snapping + tile loads, which may build an uncached
+        # tile from Overpass): give it longer than nginx's 60 s, or the rider sees a failure for a saved route.
+        proxy_read_timeout 180s;
         proxy_pass http://routecycle_test_gravel/api/v1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
