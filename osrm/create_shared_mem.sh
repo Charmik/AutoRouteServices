@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Loads part1/part2 into OSRM shared memory.
+# Loads part1/part2 into OSRM shared memory (hz4 road and hz1 gravel alike). part3 is NOT loaded on
+# purpose: the backend opens it with mmap (routing.service.osrm.triple.use.mmap.<region>=true).
 # Old segments are removed first and the load is refused if they are not really gone:
 # ipcrm/--spring-clean only MARK a segment, its RAM stays until the last process detaches,
 # and osrm-datastore allocates the new region before freeing the old one -> two copies -> OOM.
 set -euo pipefail
 
 OSRM_BUILD=~/disk/osrm-backend/build
-NEED_GB=${NEED_GB:-220}   # part1 ~150GiB + part2 ~64GiB (measured 213GiB) + margin
+NEED_GB=${NEED_GB:-220}   # road part1 ~150GiB + part2 ~64GiB (measured 213GiB, when road part1 still had africa) + margin
 
 cd "$OSRM_BUILD"
 
