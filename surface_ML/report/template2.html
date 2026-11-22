@@ -1,0 +1,272 @@
+<title>Paved or Unpaved, US Roads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,650&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column, wide figures and tables scroll in place; two class colours (asphalt / gravel) carry through every chart */
+:root {
+  --bg: #f5f6f4;
+  --surface: #ffffff;
+  --fg: #1d2326;
+  --muted: #5d676b;
+  --rule: #d8dcd9;
+  --paved: #3b4f63;
+  --unpaved: #b0773a;
+  --good: #2f7d4f;
+  --font-display: "Literata", Georgia, "Times New Roman", serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15191b; --surface: #1d2326; --fg: #e3e7e5; --muted: #9aa4a8; --rule: #323a3d;
+    --paved: #8fb0cf; --unpaved: #dba366; --good: #6cc48f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15191b; --surface: #1d2326; --fg: #e3e7e5; --muted: #9aa4a8; --rule: #323a3d;
+  --paved: #8fb0cf; --unpaved: #dba366; --good: #6cc48f; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--font-body); }
+main { max-width: 760px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 40px; }
+section { display: grid; gap: 14px; min-width: 0; }
+h1, h2 { font-family: var(--font-display); font-weight: 650; text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 2.1rem; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; font-weight: 600; }
+p, ul { margin: 0; max-width: 65ch; }
+ul { padding-left: 1.2em; display: grid; gap: 6px; }
+.lede { font-size: 1.1rem; color: var(--muted); }
+.meta { font: 13px var(--font-data); color: var(--muted); }
+.headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 4px; }
+.figure b { font: 600 1.9rem/1.1 var(--font-data); font-variant-numeric: tabular-nums; }
+.figure span { font-size: 0.9rem; color: var(--muted); }
+.figure.best b { color: var(--good); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td.n { font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+th.n { text-align: right; }
+tr.top td { font-weight: 600; }
+tr.top td.n { color: var(--good); }
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.chart .tick, .chart .lab { fill: var(--muted); font: 11px var(--font-data); }
+.chart .val { fill: var(--fg); font: 600 11px var(--font-data); }
+.chart .bar { fill: var(--paved); opacity: 0.55; }
+.chart .bar.hl { opacity: 1; }
+.chart .err { stroke: var(--fg); stroke-width: 1.2; }
+.chart .mark { stroke: var(--muted); stroke-dasharray: 3 4; }
+.chart .line { stroke-width: 2.2; }
+.chart .c-img { stroke: var(--paved); fill: var(--paved); }
+.chart .c-stk { stroke: var(--unpaved); fill: var(--unpaved); }
+.chart path.line { fill: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.78rem; font-weight: 600; }
+.chip.paved { background: color-mix(in srgb, var(--paved) 18%, transparent); color: var(--paved); }
+.chip.unpaved { background: color-mix(in srgb, var(--unpaved) 20%, transparent); color: var(--unpaved); }
+.verdict { border-left: 3px solid var(--good); padding-left: 14px; }
+figure { margin: 0; display: grid; gap: 8px; }
+figcaption { font-size: 0.85rem; color: var(--muted); max-width: 65ch; }
+img { max-width: 100%; border-radius: 4px; }
+code { font: 0.88em var(--font-data); }
+.chart .c-sus { stroke: var(--good); fill: var(--good); }
+.chart .bar.dim { opacity: 0.3; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.two > * { min-width: 0; }
+dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 0.93rem; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+.note { font-size: 0.88rem; color: var(--muted); }
+</style>
+
+<main>
+  <header style="display:grid;gap:12px">
+    <p class="meta">NAIP aerial imagery · OpenStreetMap surface tags · CPU only · 13–19 Nov 2026</p>
+    <h1>Paved or unpaved: two models compared and combined</h1>
+    <p class="lede">We ran two road-surface classifiers on US aerial photos: jdalrym2's MaskCNN, which we trained here, and GIScience's SUSformer. We scored each on its own, then tried several ways to combine them. All numbers come from the same 11,792 held-out roads, in areas neither model trained on.</p>
+  </header>
+
+  <section>
+    <div class="headline">
+      <div class="figure"><b>95.8%</b><span>our MaskCNN alone</span></div>
+      <div class="figure"><b>97.2%</b><span>SUSformer, retrained on US photos</span></div>
+      <div class="figure best"><b>97.6%</b><span>both models + OSM tags, every road answered</span></div>
+      <div class="figure best"><b>99.9%</b><span>same, on the 80% of roads it is most sure about</span></div>
+    </div>
+    <p>SUSformer as released scores only 85% on US photos. After retraining it on our 44k US training roads it beats our model by 1.4 points. Combining both models with OSM tags adds another 0.3 points and gives the most reliable confidence scores. 100% is not reachable because the answers come from OSM tags, and some of those are wrong.</p>
+  </section>
+
+  <section>
+    <h2>The two models</h2>
+    <div class="scroll"><table>
+      <tr><th></th><th>MaskCNN (ours)</th><th>SUSformer (GIScience)</th></tr>
+      <tr><td>Source</td><td>jdalrym2/road_surface_classifier</td><td>GIScience/Road-surface-classification-for-FAIR</td></tr>
+      <tr><td>What it looks at</td><td>One 256 × 256 m square around the road, resampled to 1 m pixels, with infrared and a road mask</td><td>Up to 4 close-ups spaced along the road, each turned so the road runs up the middle, at the photo's full 0.3–0.6 m detail</td></tr>
+      <tr><td>Network</td><td>Two ResNet-18 encoders and a U-Net decoder</td><td>DINOv3 ViT-S/16 vision transformer, with attention pooling over the close-ups</td></tr>
+      <tr><td>Original training data</td><td>US NAIP photos with OSM tags</td><td>About 4,600 hand-labelled roads in drone imagery (about 5 cm pixels), mostly outside the US</td></tr>
+      <tr><td>Our training</td><td>From the 8-surface model, 8 passes on 44k US roads, about 2 days on CPU</td><td>From their released weights, 8 passes on the same 44k roads with 30 m close-ups, 17 hours on CPU</td></tr>
+      <tr><td>Licence</td><td>Code and weights we trained: MIT</td><td>Code MIT; weights fall under Meta's DINOv3 License, which needs checking before you redistribute them</td></tr>
+    </table></div>
+    <figure>
+      <img alt="Two roads. For each, a wide square view on the left and four rotated close-ups on the right. Top: a gravel yard among grain bins. Bottom: a two-lane asphalt road with a yellow centre line." src="data:image/jpeg;base64,{{VIEWS_IMG}}">
+      <figcaption>What each model sees. Left: our model's 256 m view. Right: SUSformer's four 30 m close-ups. Top: a gravel yard (OSM: gravel). Ours said paved; SUSformer said unpaved, with 94% confidence. Bottom: an asphalt road in Washington. Ours said unpaved; in the close-ups the centre line is plain, and SUSformer said paved with 88% confidence.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>1. Each model on its own</h2>
+    <p>SUSformer was trained on drone photos about ten times sharper than NAIP, so we first ran it unchanged. It scored 84–85%. It calls many gravel and compacted roads paved, getting only 57–63% of them right. Wider close-ups help a little.</p>
+    <div class="scroll"><table>
+      <tr><th>Model</th><th class="n">All held-out</th><th class="n">Real US mix</th></tr>
+      <tr><td>SUSformer as released, 15 m close-ups (its default)</td><td class="n">83.7%</td><td class="n">85.0%</td></tr>
+      <tr><td>SUSformer as released, 20 m close-ups</td><td class="n">85.1%</td><td class="n">86.4%</td></tr>
+      <tr><td>SUSformer as released, 30 m close-ups</td><td class="n">85.1%</td><td class="n">86.2%</td></tr>
+      <tr><td>Our MaskCNN (3 saved versions × 4 flipped copies)</td><td class="n">95.8%</td><td class="n">94.6%</td></tr>
+      <tr class="top"><td>SUSformer retrained on US photos, 30 m close-ups, 4 flipped copies</td><td class="n">97.2%</td><td class="n">96.8%</td></tr>
+    </table></div>
+    <p>We then retrained SUSformer on the same 44,083 US training roads our model used, starting from its released weights and keeping its own training recipe. The first pass only trains the final layer. After that the whole network trains, and accuracy levels off at about 97% by pass 5.</p>
+    <figure>
+      {{CHART_SUS_PASSES}}
+      <figcaption>SUSformer during retraining: the average of its paved and unpaved accuracy on the held-out roads after each pass. Pass 1 trains only the last layer. We kept pass 7.</figcaption>
+    </figure>
+    <p class="note">Averaging SUSformer's three best saved versions gave 97.26% against 97.24% for the single best, so we kept one version. Both models' best versions were chosen on this held-out set, which flatters each by a similar small amount.</p>
+  </section>
+
+  <section>
+    <h2>2. Where each model does better</h2>
+    <p>The retrained SUSformer is better on every unpaved surface and on asphalt and concrete. Our model is slightly better on paving stones and bricks, which it saw more of in its 8-surface training. Roads tagged only <code>surface=paved</code> are the hardest for both. Many of those look like wrong tags.</p>
+    <div class="scroll"><table>
+      <tr><th>OSM surface tag</th><th class="n">Roads</th><th class="n">MaskCNN</th><th class="n">SUSformer</th><th class="n">Both + tags</th></tr>
+      <tr><td><span class="chip paved">asphalt</span></td><td class="n">2,979</td><td class="n">95.0%</td><td class="n">96.4%</td><td class="n">96.7%</td></tr>
+      <tr><td><span class="chip paved">paving_stones</span></td><td class="n">1,585</td><td class="n">99.2%</td><td class="n">97.8%</td><td class="n">99.2%</td></tr>
+      <tr><td><span class="chip unpaved">gravel</span></td><td class="n">1,480</td><td class="n">94.3%</td><td class="n">98.0%</td><td class="n">97.8%</td></tr>
+      <tr><td><span class="chip unpaved">unpaved</span></td><td class="n">1,253</td><td class="n">95.1%</td><td class="n">97.0%</td><td class="n">97.2%</td></tr>
+      <tr><td><span class="chip unpaved">compacted</span></td><td class="n">1,180</td><td class="n">95.6%</td><td class="n">97.2%</td><td class="n">97.9%</td></tr>
+      <tr><td><span class="chip unpaved">dirt</span></td><td class="n">1,120</td><td class="n">96.4%</td><td class="n">98.2%</td><td class="n">98.0%</td></tr>
+      <tr><td><span class="chip paved">concrete</span></td><td class="n">1,079</td><td class="n">97.0%</td><td class="n">97.9%</td><td class="n">98.3%</td></tr>
+      <tr><td><span class="chip unpaved">ground</span></td><td class="n">620</td><td class="n">96.5%</td><td class="n">98.2%</td><td class="n">97.9%</td></tr>
+      <tr><td><span class="chip paved">bricks</span></td><td class="n">298</td><td class="n">99.3%</td><td class="n">97.7%</td><td class="n">99.3%</td></tr>
+      <tr><td><span class="chip paved">paved</span></td><td class="n">151</td><td class="n">78.1%</td><td class="n">86.8%</td><td class="n">84.1%</td></tr>
+    </table></div>
+    <div class="two">
+      <div class="scroll"><table>
+        <tr><th>Photo pixel size</th><th class="n">Roads</th><th class="n">MaskCNN</th><th class="n">SUSformer</th></tr>
+        <tr><td>0.3 m (newer NAIP)</td><td class="n">4,075</td><td class="n">96.2%</td><td class="n">97.5%</td></tr>
+        <tr><td>0.6 m</td><td class="n">7,717</td><td class="n">95.6%</td><td class="n">97.1%</td></tr>
+      </table></div>
+      <div class="scroll"><table>
+        <tr><th>Close-ups per road</th><th class="n">Roads</th><th class="n">MaskCNN</th><th class="n">SUSformer</th></tr>
+        <tr><td>1 (under 40 m long)</td><td class="n">1,446</td><td class="n">96.3%</td><td class="n">95.7%</td></tr>
+        <tr><td>2–3</td><td class="n">1,543</td><td class="n">96.5%</td><td class="n">96.8%</td></tr>
+        <tr><td>4 (80 m and longer)</td><td class="n">8,803</td><td class="n">95.6%</td><td class="n">97.6%</td></tr>
+      </table></div>
+    </div>
+    <p>SUSformer's lead comes from longer roads, where it gets four close-ups. On very short roads our model's wider view does slightly better. Sharper 0.3 m photos help both models a little.</p>
+  </section>
+
+  <section>
+    <h2>3. Combining the two</h2>
+    <p>The models agree on 96.1% of roads, and are 98.4% right where they agree. On the 456 roads where they disagree, SUSformer is right 68% of the time and ours 32%. We tried three fixed rules and four learned combinations. The learned ones are small gradient-boosted models, scored by holding out whole 1° squares of the map so they cannot memorise places.</p>
+    <figure>
+      {{CHART_COMBINE}}
+      <figcaption>Accuracy on all 11,792 held-out roads. “As released” is SUSformer before retraining; every other SUSformer bar uses the retrained version.</figcaption>
+    </figure>
+    <div class="scroll"><table>
+      <tr><th>Method</th><th class="n">All held-out</th><th class="n">Real US mix</th></tr>
+      <tr><td>MaskCNN alone</td><td class="n">95.8%</td><td class="n">94.6%</td></tr>
+      <tr><td>SUSformer alone</td><td class="n">97.2%</td><td class="n">96.8%</td></tr>
+      <tr><td>Rule: paved only if both say paved</td><td class="n">96.7%</td><td class="n">95.4%</td></tr>
+      <tr><td>Rule: paved if either says paved</td><td class="n">96.4%</td><td class="n">96.0%</td></tr>
+      <tr><td>Rule: average the two probabilities</td><td class="n">97.3%</td><td class="n">96.5%</td></tr>
+      <tr><td>Learned: MaskCNN + OSM tags (previous best)</td><td class="n">96.4%</td><td class="n">95.5%</td></tr>
+      <tr><td>Learned: MaskCNN + SUSformer</td><td class="n">97.1%</td><td class="n">96.3%</td></tr>
+      <tr><td>Learned: SUSformer + OSM tags</td><td class="n">97.4%</td><td class="n">96.8%</td></tr>
+      <tr class="top"><td>Learned: MaskCNN + SUSformer + OSM tags</td><td class="n">97.6%</td><td class="n">96.7%</td></tr>
+    </table></div>
+    <p>“Real US mix” is the 4,353 held-out roads sampled in proportion to how common each surface is in the US. It is mostly asphalt, generic <code>unpaved</code> and gravel. On that mix, SUSformer alone is as good as any combination.</p>
+  </section>
+
+  <section>
+    <h2>The “both must say paved” rule</h2>
+    <p>This rule does not give the best overall accuracy, but it is the strictest about calling a road paved. Use it when calling a dirt road paved costs more than missing a paved road.</p>
+    <div class="scroll"><table>
+      <tr><th>Method</th><th class="n">Says “paved” and is right</th><th class="n">Real paved roads found</th><th class="n">Real unpaved roads found</th></tr>
+      <tr><td>MaskCNN alone</td><td class="n">95.7%</td><td class="n">96.2%</td><td class="n">95.4%</td></tr>
+      <tr><td>SUSformer alone</td><td class="n">97.8%</td><td class="n">96.9%</td><td class="n">97.6%</td></tr>
+      <tr class="top"><td>Paved only if both say paved</td><td class="n">98.7%</td><td class="n">94.8%</td><td class="n">98.6%</td></tr>
+      <tr><td>Paved if either says paved</td><td class="n">95.0%</td><td class="n">98.3%</td><td class="n">94.4%</td></tr>
+      <tr><td>Both + OSM tags (learned)</td><td class="n">97.9%</td><td class="n">97.5%</td><td class="n">97.7%</td></tr>
+    </table></div>
+    <p class="note">The learned combination can be tuned the same way: raise the probability needed before it says “paved”, and it trades found paved roads for fewer false ones, usually more efficiently than the fixed rule.</p>
+  </section>
+
+  <section>
+    <h2>4. Answering only when confident</h2>
+    <p>Each method outputs a probability. Sort roads from most to least confident, answer for the top share, and flag the rest as uncertain. This is where the combination helps most: at 80% of roads answered, it is wrong about once per 700 roads, against once per 150 for our model alone.</p>
+    <figure>
+      {{CHART_COV}}
+      <div class="legend"><span><i style="background:var(--paved)"></i>MaskCNN alone</span><span><i style="background:var(--good)"></i>SUSformer alone</span><span><i style="background:var(--unpaved)"></i>both + OSM tags</span><span>dashed line: 80% of roads</span></div>
+    </figure>
+    <div class="scroll"><table>
+      <tr><th>Roads answered</th><th class="n">MaskCNN</th><th class="n">SUSformer</th><th class="n">Both + tags</th></tr>
+      <tr><td>100%</td><td class="n">95.83%</td><td class="n">97.24%</td><td class="n">97.57%</td></tr>
+      <tr><td>95%</td><td class="n">97.55%</td><td class="n">98.71%</td><td class="n">98.92%</td></tr>
+      <tr><td>90%</td><td class="n">98.45%</td><td class="n">99.32%</td><td class="n">99.52%</td></tr>
+      <tr class="top"><td>80%</td><td class="n">99.35%</td><td class="n">99.72%</td><td class="n">99.86%</td></tr>
+      <tr><td>70%</td><td class="n">99.66%</td><td class="n">99.83%</td><td class="n">99.88%</td></tr>
+      <tr><td>50%</td><td class="n">99.80%</td><td class="n">99.90%</td><td class="n">99.93%</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Earlier experiments on our model</h2>
+    <p>Before adding SUSformer, we tried to push MaskCNN alone. Its training curve:</p>
+    <figure>
+      {{CHART_PASSES}}
+      <figcaption>MaskCNN paved/unpaved accuracy on the held-out roads after each training pass (4–7 hours each).</figcaption>
+    </figure>
+    <div class="scroll"><table>
+      <tr><th>Approach</th><th class="n">All held-out</th></tr>
+      <tr><td>Single prediction</td><td class="n">95.5%</td></tr>
+      <tr><td>+ average over 4 flipped copies</td><td class="n">95.7%</td></tr>
+      <tr><td>+ average over 3 saved versions</td><td class="n">95.8%</td></tr>
+      <tr><td>OSM tags alone, no image</td><td class="n">86.8%</td></tr>
+      <tr><td>Image + OSM tags + location + edit age</td><td class="n">96.4%</td></tr>
+    </table></div>
+    <p><b>Tag age.</b> Recently edited roads are scored more accurately: 96.6–97.0% for edits within a year, against 94.8% for roads untouched for 8+ years and 94.4% for roads edited only once. To test whether newer tags make better training labels, we retrained four times on 7,220 roads each, changing only how they were chosen:</p>
+    <figure>
+      {{CHART_EXPS}}
+      <figcaption>Error bars: ±1 standard error (about ±0.2 points). All four are within noise of each other.</figcaption>
+    </figure>
+    <p class="verdict">Filtering training roads by edit date, or removing tags an earlier model disagreed with, made no measurable difference. More training roads and a sharper view of the road surface matter far more.</p>
+  </section>
+
+  <section>
+    <h2>What the remaining errors look like</h2>
+    <figure>
+      <img alt="Twelve aerial chips with the OSM way drawn in red, each labelled with its OSM tag and the model's opposite prediction" src="data:image/jpeg;base64,{{ERRORS_IMG}}">
+      <figcaption>MaskCNN's 12 most confident disagreements with OSM (OSM tag / prediction). Several look like wrong OSM tags: a divided highway tagged “ground”, a red dirt track tagged “paved”, suburban streets tagged “dirt”. Others are roads hidden under trees.</figcaption>
+    </figure>
+    <p>In a review of the top 24, about 10 looked like wrong tags and 4 were hidden roads. Measured accuracy therefore understates true accuracy by up to about a point.</p>
+  </section>
+
+  <section>
+    <h2>Recommendation</h2>
+    <ul>
+      <li><b>Best accuracy:</b> run both models and combine them with the OSM tags: 97.6% on every road, 99.9% on the 80% it is most confident about.</li>
+      <li><b>Simplest good option:</b> retrained SUSformer alone: 97.2%, and 99.7% at 80% answered.</li>
+      <li><b>Fewest false “paved” calls:</b> “paved only if both say paved”. 98.7% of its paved answers are right, at the cost of missing about 5% of paved roads.</li>
+      <li>Check the DINOv3 License before using SUSformer's weights in a product or redistributing them.</li>
+      <li>Decide the final class grouping before labelling the whole US. Changing it means retraining both models, about one day for SUSformer and one day for MaskCNN starting from the current weights.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h3>Files</h3>
+    <p class="meta">MaskCNN: work/full/results_bin/20261115_171004Z/ · SUSformer retrained: work/gis/results_ft/20261117_223333Z/sus-epoch=06-val_acc=0.97138.ckpt · Per-road scores of every method: work/gis/ft_combined.csv · Scripts: work/scripts/ (gis_fetch, gis_train, gis_eval, combine_eval)</p>
+  </section>
+</main>

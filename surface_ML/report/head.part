@@ -1,0 +1,75 @@
+<title>Paved or Unpaved, US Roads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,650&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column, wide figures and tables scroll in place; two class colours (asphalt / gravel) carry through every chart */
+:root {
+  --bg: #f5f6f4;
+  --surface: #ffffff;
+  --fg: #1d2326;
+  --muted: #5d676b;
+  --rule: #d8dcd9;
+  --paved: #3b4f63;
+  --unpaved: #b0773a;
+  --good: #2f7d4f;
+  --font-display: "Literata", Georgia, "Times New Roman", serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15191b; --surface: #1d2326; --fg: #e3e7e5; --muted: #9aa4a8; --rule: #323a3d;
+    --paved: #8fb0cf; --unpaved: #dba366; --good: #6cc48f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15191b; --surface: #1d2326; --fg: #e3e7e5; --muted: #9aa4a8; --rule: #323a3d;
+  --paved: #8fb0cf; --unpaved: #dba366; --good: #6cc48f; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--font-body); }
+main { max-width: 760px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 40px; }
+section { display: grid; gap: 14px; min-width: 0; }
+h1, h2 { font-family: var(--font-display); font-weight: 650; text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 2.1rem; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; font-weight: 600; }
+p, ul { margin: 0; max-width: 65ch; }
+ul { padding-left: 1.2em; display: grid; gap: 6px; }
+.lede { font-size: 1.1rem; color: var(--muted); }
+.meta { font: 13px var(--font-data); color: var(--muted); }
+.headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 4px; }
+.figure b { font: 600 1.9rem/1.1 var(--font-data); font-variant-numeric: tabular-nums; }
+.figure span { font-size: 0.9rem; color: var(--muted); }
+.figure.best b { color: var(--good); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td.n { font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+th.n { text-align: right; }
+tr.top td { font-weight: 600; }
+tr.top td.n { color: var(--good); }
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.chart .tick, .chart .lab { fill: var(--muted); font: 11px var(--font-data); }
+.chart .val { fill: var(--fg); font: 600 11px var(--font-data); }
+.chart .bar { fill: var(--paved); opacity: 0.55; }
+.chart .bar.hl { opacity: 1; }
+.chart .err { stroke: var(--fg); stroke-width: 1.2; }
+.chart .mark { stroke: var(--muted); stroke-dasharray: 3 4; }
+.chart .line { stroke-width: 2.2; }
+.chart .c-img { stroke: var(--paved); fill: var(--paved); }
+.chart .c-stk { stroke: var(--unpaved); fill: var(--unpaved); }
+.chart path.line { fill: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.78rem; font-weight: 600; }
+.chip.paved { background: color-mix(in srgb, var(--paved) 18%, transparent); color: var(--paved); }
+.chip.unpaved { background: color-mix(in srgb, var(--unpaved) 20%, transparent); color: var(--unpaved); }
+.verdict { border-left: 3px solid var(--good); padding-left: 14px; }
+figure { margin: 0; display: grid; gap: 8px; }
+figcaption { font-size: 0.85rem; color: var(--muted); max-width: 65ch; }
+img { max-width: 100%; border-radius: 4px; }
+code { font: 0.88em var(--font-data); }

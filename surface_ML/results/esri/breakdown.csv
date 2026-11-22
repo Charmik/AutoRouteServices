@@ -1,0 +1,102 @@
+region,approach,by,value,acc,n
+us,esri_ens,zoom,19,0.9609804902451226,3998
+us,esri_ens,img_after_edit,image newer than last edit,0.9613547546678246,2303
+us,esri_ens,img_after_edit,image older than last edit,0.96047197640118,1695
+us,esri_ens,img_year,2019,0.9743589743589743,39
+us,esri_ens,img_year,2020,0.9411764705882353,34
+us,esri_ens,img_year,2021,0.96,100
+us,esri_ens,img_year,2022,0.9724137931034482,145
+us,esri_ens,img_year,2023,0.9496644295302014,298
+us,esri_ens,img_year,2024,0.9620786516853933,712
+us,esri_ens,img_year,2025,0.9585585585585585,2220
+us,esri_ens,img_year,2026,0.989010989010989,364
+us,esri_ens,highway,motorway,1.0,96
+us,esri_ens,highway,motorway_link,1.0,65
+us,esri_ens,highway,primary,1.0,215
+us,esri_ens,highway,residential,0.9511025886864813,2086
+us,esri_ens,highway,secondary,0.9755102040816327,245
+us,esri_ens,highway,tertiary,0.9508196721311475,366
+us,esri_ens,highway,trunk,1.0,79
+us,esri_ens,highway,unclassified,0.9628712871287128,808
+us,esri_ens,nice_desc,IGIO,0.90625,32
+us,esri_ens,nice_desc,"MO911ServiceBoard,MDC",0.9230769230769231,39
+us,esri_ens,nice_desc,MassGIS,0.9012345679012346,81
+us,esri_ens,nice_desc,NC CGIA,0.9454545454545454,55
+us,esri_ens,nice_desc,Nearmap,1.0,83
+us,esri_ens,nice_desc,New York State,0.9696969696969697,33
+us,esri_ens,nice_desc,Salt Lake County,0.9736842105263158,38
+us,esri_ens,nice_desc,State of Florida,0.9538461538461539,195
+us,esri_ens,nice_desc,VCGI,0.9444444444444444,54
+us,esri_ens,nice_desc,VGIN,0.9666666666666667,60
+us,esri_ens,nice_desc,Vantor,0.9626936452734746,3163
+fr_provence,esri_r2,zoom,19,0.9493333333333334,1500
+fr_provence,esri_r2,img_after_edit,image newer than last edit,0.943213296398892,722
+fr_provence,esri_r2,img_after_edit,image older than last edit,0.9550128534704371,778
+fr_provence,esri_r2,img_year,2022,0.9230769230769231,39
+fr_provence,esri_r2,img_year,2023,0.9577464788732394,71
+fr_provence,esri_r2,img_year,2024,0.9230769230769231,65
+fr_provence,esri_r2,img_year,2025,0.9527027027027027,1184
+fr_provence,esri_r2,img_year,2026,0.9052631578947369,95
+fr_provence,esri_r2,highway,path,0.9671052631578947,304
+fr_provence,esri_r2,highway,primary,1.0,105
+fr_provence,esri_r2,highway,residential,0.9404761904761905,252
+fr_provence,esri_r2,highway,secondary,0.9914529914529915,117
+fr_provence,esri_r2,highway,service,0.8358974358974359,195
+fr_provence,esri_r2,highway,tertiary,0.9789473684210527,95
+fr_provence,esri_r2,highway,track,0.9813664596273292,322
+fr_provence,esri_r2,highway,unclassified,0.8953488372093024,86
+fr_provence,esri_r2,nice_desc,Vantor,0.9493333333333334,1500
+de_bavaria,esri_r2,zoom,19,0.9297297297297298,1480
+de_bavaria,esri_r2,img_after_edit,image newer than last edit,0.9295212765957447,752
+de_bavaria,esri_r2,img_after_edit,image older than last edit,0.929945054945055,728
+de_bavaria,esri_r2,img_year,2022,0.92,400
+de_bavaria,esri_r2,img_year,2023,0.9526627218934911,169
+de_bavaria,esri_r2,img_year,2024,0.9261992619926199,271
+de_bavaria,esri_r2,img_year,2025,0.93125,640
+de_bavaria,esri_r2,highway,path,0.8935574229691877,357
+de_bavaria,esri_r2,highway,residential,0.9635036496350365,274
+de_bavaria,esri_r2,highway,secondary,1.0,71
+de_bavaria,esri_r2,highway,service,0.8932038834951457,103
+de_bavaria,esri_r2,highway,tertiary,0.9852941176470589,68
+de_bavaria,esri_r2,highway,track,0.9360824742268041,485
+de_bavaria,esri_r2,highway,unclassified,0.847457627118644,59
+de_bavaria,esri_r2,nice_desc,BVV – geodaten.bayern.de,0.9190600522193212,383
+de_bavaria,esri_r2,nice_desc,Land Tirol - data.gv.at,0.9047619047619048,42
+de_bavaria,esri_r2,nice_desc,Vantor,0.9345351043643264,1054
+au_victoria,esri_r2,zoom,18,0.9499136442141624,579
+au_victoria,esri_r2,zoom,19,0.9261672095548317,921
+au_victoria,esri_r2,img_after_edit,image newer than last edit,0.9377664109121909,1173
+au_victoria,esri_r2,img_after_edit,image older than last edit,0.926605504587156,327
+au_victoria,esri_r2,img_year,2024,0.9318181818181818,44
+au_victoria,esri_r2,img_year,2025,0.9303857008466604,1063
+au_victoria,esri_r2,img_year,2026,0.9466292134831461,356
+au_victoria,esri_r2,highway,cycleway,0.7372262773722628,137
+au_victoria,esri_r2,highway,path,0.9180327868852459,183
+au_victoria,esri_r2,highway,primary,1.0,91
+au_victoria,esri_r2,highway,residential,0.9659863945578231,441
+au_victoria,esri_r2,highway,secondary,0.9814814814814815,54
+au_victoria,esri_r2,highway,service,0.8773584905660378,106
+au_victoria,esri_r2,highway,tertiary,0.9905660377358491,106
+au_victoria,esri_r2,highway,track,0.975,120
+au_victoria,esri_r2,highway,unclassified,0.9551020408163265,245
+au_victoria,esri_r2,nice_desc,Vantor,0.9353333333333333,1500
+jp_hokkaido,esri_r2,zoom,18,0.9274673008323424,841
+jp_hokkaido,esri_r2,zoom,19,0.9253048780487805,656
+jp_hokkaido,esri_r2,img_after_edit,image newer than last edit,0.9272976680384087,729
+jp_hokkaido,esri_r2,img_after_edit,image older than last edit,0.9258777633289987,769
+jp_hokkaido,esri_r2,img_year,2019,0.9262295081967213,122
+jp_hokkaido,esri_r2,img_year,2021,0.8421052631578947,76
+jp_hokkaido,esri_r2,img_year,2022,0.984375,64
+jp_hokkaido,esri_r2,img_year,2023,0.9420289855072463,207
+jp_hokkaido,esri_r2,img_year,2024,0.9402985074626866,67
+jp_hokkaido,esri_r2,img_year,2025,0.9226190476190477,840
+jp_hokkaido,esri_r2,img_year,2026,0.9512195121951219,82
+jp_hokkaido,esri_r2,highway,path,0.7702702702702703,74
+jp_hokkaido,esri_r2,highway,primary,0.9405940594059405,101
+jp_hokkaido,esri_r2,highway,residential,0.9454022988505747,348
+jp_hokkaido,esri_r2,highway,secondary,0.9642857142857143,84
+jp_hokkaido,esri_r2,highway,service,0.7655172413793103,145
+jp_hokkaido,esri_r2,highway,tertiary,0.9629629629629629,108
+jp_hokkaido,esri_r2,highway,track,0.9829268292682927,410
+jp_hokkaido,esri_r2,highway,unclassified,0.9252336448598131,214
+jp_hokkaido,esri_r2,nice_desc,Vantor,0.9265687583444593,1498

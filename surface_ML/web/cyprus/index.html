@@ -1,0 +1,338 @@
+<title>Cyprus Surface Check</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;700&display=swap">
+<style>
+/* Inspection bench: filters on top, map plate left, road card right, register below. */
+:root{
+  --bg:#f2f4f3; --panel:#ffffff; --ink:#18221f; --muted:#5d6b66; --line:#d6ddda; --land:#e3e8e5; --edge:#c3ccc8;
+  --paved:#2563a8; --unpaved:#a8642a; --mid:#9a9a9a; --wrong:#c2312d; --ok:#1f8a5c; --accent:#0f6e8a; --unsure:#7a6a9a;
+  --display:"Archivo",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111715; --panel:#18201d; --ink:#e4ebe8; --muted:#94a39d; --line:#2c3833; --land:#222c29; --edge:#34423d;
+  --paved:#5b9be0; --unpaved:#d9935a; --mid:#8a8a8a; --wrong:#f0675a; --ok:#3fc489; --accent:#4fb3d0; --unsure:#a998cc; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111715; --panel:#18201d; --ink:#e4ebe8; --muted:#94a39d; --line:#2c3833; --land:#222c29; --edge:#34423d;
+  --paved:#5b9be0; --unpaved:#d9935a; --mid:#8a8a8a; --wrong:#f0675a; --ok:#3fc489; --accent:#4fb3d0; --unsure:#a998cc; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14.5px;line-height:1.5}
+.wrap{max-width:1360px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+h1{font-family:var(--display);font-size:clamp(22px,3vw,30px);margin:0;line-height:1.15;text-wrap:balance}
+.lede{color:var(--muted);margin:4px 0 0;max-width:95ch}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:end;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>span{font:600 10.5px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.seg{display:flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg button{font:500 13px var(--body);padding:6px 11px;border:0;background:var(--panel);color:var(--ink);cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+select{font:13px var(--body);padding:6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);max-width:100%}
+.summary{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13.5px;color:var(--muted)}
+.summary b{color:var(--ink);font:600 15px var(--mono)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:14px}
+@media (max-width:920px){.grid{grid-template-columns:minmax(0,1fr)}}
+.plate{position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--bg);min-width:0}
+canvas{display:block;width:100%;height:min(60vh,600px);cursor:pointer;touch-action:none}
+.attr{position:absolute;right:0;bottom:0;background:var(--panel);opacity:.85;font-size:10.5px;padding:1px 5px;color:var(--muted)}
+.legend{position:absolute;left:10px;bottom:10px;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:3px}
+.ramp{width:160px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--unpaved),var(--mid),var(--paved))}
+.legend .ends{display:flex;justify-content:space-between;color:var(--muted);font-family:var(--mono);font-size:11px}
+.zoombtns{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:4px}
+.zoombtns button{width:32px;height:32px;font:600 16px var(--body);background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:4px;cursor:pointer}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card h2{font:600 16px var(--display);margin:0;overflow-wrap:anywhere}
+.thumb{width:256px;height:256px;max-width:100%;border-radius:4px;border:1px solid var(--line);background-color:var(--land);background-repeat:no-repeat;image-rendering:auto}
+.thumbnote{font-size:12px;color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.meter{display:inline-block;width:70px;height:7px;border-radius:4px;background:var(--line);vertical-align:middle;margin-left:6px;position:relative;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:4px}
+.links{display:flex;flex-wrap:wrap;gap:6px}
+.links a{font:500 13px var(--body);padding:6px 10px;border:1px solid var(--line);border-radius:5px;color:var(--ink);text-decoration:none;background:var(--bg)}
+.links a:hover{border-color:var(--accent);color:var(--accent)}
+.verdict{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.verdict .lbl{font:600 10.5px var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.vbtns{display:flex;flex-wrap:wrap;gap:6px}
+.vbtns button{font:600 13px var(--body);padding:7px 12px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);cursor:pointer}
+.vbtns button[data-v="paved"][aria-pressed="true"]{background:var(--paved);border-color:var(--paved);color:#fff}
+.vbtns button[data-v="unpaved"][aria-pressed="true"]{background:var(--unpaved);border-color:var(--unpaved);color:#fff}
+.vbtns button[data-v="unsure"][aria-pressed="true"]{background:var(--unsure);border-color:var(--unsure);color:#fff}
+.vbtns button[data-v="next"]{margin-left:auto}
+.vnote{font-size:12px;color:var(--muted)}
+kbd{font:500 11px var(--mono);border:1px solid var(--line);border-radius:3px;padding:0 4px;background:var(--bg)}
+.chip{display:inline-block;font:600 11px var(--mono);padding:1px 7px;border-radius:10px;color:#fff}
+.chip.ok{background:var(--ok)} .chip.bad{background:var(--wrong)} .chip.new{background:var(--accent)} .chip.uns{background:var(--unsure)}
+.empty{color:var(--muted)}
+.tablebox{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 10.5px var(--body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);background:var(--panel);cursor:pointer}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.nm{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+tbody tr{cursor:pointer}
+tbody tr:hover,tbody tr.sel{background:var(--bg)}
+.more{display:flex;justify-content:center;padding:10px}
+.more button{font:500 13px var(--body);padding:6px 14px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);cursor:pointer}
+.notes{color:var(--muted);font-size:13px;max-width:100ch}
+.notes p{margin:4px 0}
+.status{font-size:12.5px;color:var(--muted)}
+button:focus-visible,select:focus-visible,a:focus-visible,tr:focus-visible,th:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Cyprus: every road, paved or unpaved</h1>
+    <p class="lede">The Esri SUSformer model (round 2, trained on the US, Provence, Bavaria, Victoria and Hokkaido; never on Cyprus) run on every OSM way in Cyprus it covers: 147,463 ways. <b>Untagged</b> ways have no surface tag, so the colour is the model’s guess. <b>Tagged</b> ways have a paved/unpaved surface tag the model never saw, so you can see where it disagrees with OSM. Click a road, judge it from the crop and the links.</p>
+  </header>
+
+  <div class="bar">
+    <div class="fld"><span>Region</span><div class="seg" id="f-country"></div></div>
+    <div class="fld"><span>Set</span><div class="seg" id="f-set">
+      <button data-v="untagged" aria-pressed="true">Untagged (model’s guess)</button><button data-v="tagged" aria-pressed="false">Tagged (vs OSM)</button></div></div>
+    <div class="fld"><span>Show</span><select id="f-show">
+      <option value="all">All roads</option>
+      <option value="wrong">Prediction disagrees with OSM tag</option>
+      <option value="confpaved">Confident paved (p ≥ 0.9)</option>
+      <option value="confunp">Confident unpaved (p ≤ 0.1)</option>
+      <option value="undecided">Undecided (0.1–0.9)</option>
+      <option value="unchecked">Not checked yet</option>
+      <option value="checked">Checked</option>
+      <option value="modelwrong">Checked: model wrong</option>
+    </select></div>
+    <div class="fld"><span>Class</span><select id="f-class"><option value="">All classes</option></select></div>
+<div class="fld"><span>Basemap</span><select id="f-base"><option value="osm">OpenStreetMap</option><option value="esri">Esri imagery</option><option value="none">None</option></select></div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="grid">
+    <div class="plate">
+      <canvas id="map" aria-label="Map of roads coloured by predicted paved probability"></canvas>
+      <div class="zoombtns"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset" aria-label="Fit region">⟲</button></div>
+      <div class="attr" id="attr">© OpenStreetMap contributors</div>
+      <div class="legend"><span>p(paved)</span><div class="ramp"></div><div class="ends"><span>0 unpaved</span><span>1 paved</span></div></div>
+    </div>
+    <aside class="card" id="card"><p class="empty">Click a road to see its Esri crop, scores and links.</p></aside>
+  </div>
+
+  <div class="tablebox"><table id="tbl"><thead><tr>
+    <th data-k="id" tabindex="0">Way</th><th data-k="k" tabindex="0">Class</th><th data-k="nm" tabindex="0">Name</th><th data-k="sf" tabindex="0">OSM surface</th>
+    <th data-k="p" tabindex="0">p(paved)</th><th data-k="v" tabindex="0">vs OSM</th><th data-k="m" tabindex="0">Your check</th><th data-k="d" tabindex="0">Image date</th><th data-k="z" tabindex="0">Zoom</th>
+  </tr></thead><tbody></tbody></table><div class="more"><button id="more" hidden>Show more</button></div></div>
+
+  <div class="notes">
+    <p><b>Score.</b> p(paved) from the Esri model with 4-flip averaging; ≥ 0.5 counts as paved. "vs OSM" compares the prediction with the OSM surface tag (tagged ways only). Ways with a surface value that is neither clearly paved nor unpaved are listed as untagged.</p>
+    <p><b>The crop</b> is the 30 × 30 m Esri patch the model saw at the middle of the way, rotated so the road runs up. The model also saw up to 3 more patches along longer ways. Image date and provider come from Esri's World Imagery metadata; zoom 18 means about 0.45 m pixels instead of 0.3 m.</p>
+    <p><b>Keys.</b> With a road selected: <kbd>P</kbd> paved, <kbd>U</kbd> unpaved, <kbd>X</kbd> can't tell, <kbd>N</kbd> next road in the list. Data: OSM extracts of Sept 2026; Esri World Imagery fetched Nov 2026. Ways: the model’s highway classes, at least 20 m long, no private access, no parking aisles or driveways. Zoom in to see ways as lines; zoomed out they are dots.</p>
+    <p class="status" id="dbstatus"></p>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+(async function(){
+const D = await (await fetch('roads.json')).json();
+const R = D.roads;
+for (const r of R){ r.mid = r.g[Math.floor(r.g.length/2)]; r.key = `${r.c}-${r.s}-${r.id}`; }
+const checks = new Map();     // key -> verdict doc
+let db = null, canWrite = true;
+const st = {country:null, set:'untagged', show:'all', cls:'', score:'ps', sel:null, sortK:'p', sortDir:1, limit:200};
+const css = n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id=>document.getElementById(id);
+const present = Object.keys(D.countries).filter(k=>R.some(r=>r.c===k));
+st.country = present[0];
+$('f-country').innerHTML = Object.entries(D.countries).filter(([k])=>present.includes(k)).map(([k,v])=>`<button data-v="${k}" aria-pressed="${k===st.country}">${v}</button>`).join('');
+$('f-class').innerHTML += [...new Set(R.map(r=>r.k))].sort().map(k=>`<option>${k}</option>`).join('');
+function bindSeg(el,key){ el.addEventListener('click',e=>{const b=e.target.closest('button'); if(!b) return; st[key]=b.dataset.v; st.limit=200; el.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); if(key==='country'){st.sel=null; fit();} update();}); }
+bindSeg($('f-country'),'country'); bindSeg($('f-set'),'set');
+[['f-show','show'],['f-class','cls']].forEach(([id,k])=>$(id).addEventListener('change',e=>{st[k]=e.target.value; st.limit=200; update();}));
+function pOf(r){ if(st.score==='pn') return r.pn; if(st.score==='avg') return r.pn!=null?(r.ps+r.pn)/2:null; return r.ps; }
+function verdict(r){ const p=pOf(r); if(r.y==null||p==null) return null; return ((p>=.5)?1:0)===r.y; }
+function mine(r){ const c=checks.get(r.key); return c?c.v:null; }
+function modelRight(r){ const m=mine(r), p=pOf(r); if(!m||m==='unsure'||p==null) return null; return (p>=.5)===(m==='paved'); }
+function rows(){
+  return R.filter(r=>r.c===st.country && r.s===st.set && (!st.cls||r.k===st.cls) && pOf(r)!=null && (()=>{
+    const p=pOf(r);
+    switch(st.show){case 'wrong': return verdict(r)===false; case 'confpaved': return p>=.9; case 'confunp': return p<=.1; case 'undecided': return p>.1&&p<.9;
+      case 'unchecked': return !mine(r); case 'checked': return !!mine(r); case 'modelwrong': return modelRight(r)===false; default: return true;}
+  })());
+}
+// map
+const cv=$('map'), ctx=cv.getContext('2d');
+let proj=d3.geoMercator(), t=d3.zoomIdentity, W=0,Hh=0;
+function size(){ const b=cv.getBoundingClientRect(),dpr=devicePixelRatio||1; W=b.width;Hh=b.height; cv.width=Math.round(W*dpr); cv.height=Math.round(Hh*dpr); }
+function fit(){ const pts=R.filter(r=>r.c===st.country).map(r=>r.mid); proj=d3.geoMercator().fitExtent([[20,20],[W-20,Hh-20]],{type:'MultiPoint',coordinates:pts});
+  for(const r of R){ const xy=r.g.map(p=>proj(p)); r.xy=proj(r.mid); r.bb=[d3.min(xy,d=>d[0]),d3.min(xy,d=>d[1]),d3.max(xy,d=>d[0]),d3.max(xy,d=>d[1])]; }
+  sel.call(zoom.transform,d3.zoomIdentity); }
+let ramp=null;
+function mkRamp(){ const u=d3.color(css('--unpaved')),m=d3.color(css('--mid')),pv=d3.color(css('--paved')); ramp=d3.range(101).map(i=>{const p=i/100; return p<.5?d3.interpolateRgb(u,m)(p*2):d3.interpolateRgb(m,pv)((p-.5)*2);}); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{ramp=null; draw();});
+const col=p=>{ if(!ramp) mkRamp(); return ramp[Math.round(Math.max(0,Math.min(1,p))*100)]; };
+// basemap tiles under the roads, laid out from the same Mercator projection and zoom transform
+const BASES={osm:{url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,max:19,attr:'© OpenStreetMap contributors'},
+  esri:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,max:19,attr:'Esri World Imagery'}};
+let base='osm'; const tcache=new Map();
+function tile(u){ let im=tcache.get(u); if(!im){ im=new Image(); im.onload=()=>requestAnimationFrame(draw); im.src=u; tcache.set(u,im); if(tcache.size>600) tcache.delete(tcache.keys().next().value); } return im; }
+function drawTiles(){
+  const B=BASES[base]; if(!B) return;
+  const s=proj.scale(), [cx,cy]=proj([0,0]), S=2*Math.PI*s*t.k;
+  const X0=t.x+t.k*(cx-Math.PI*s), Y0=t.y+t.k*(cy-Math.PI*s);
+  const z=Math.max(0,Math.min(B.max,Math.round(Math.log2(S/256)))), n=2**z, ts=S/n;
+  const i0=Math.max(0,Math.floor(-X0/ts)), i1=Math.min(n-1,Math.floor((W-X0)/ts));
+  const j0=Math.max(0,Math.floor(-Y0/ts)), j1=Math.min(n-1,Math.floor((Hh-Y0)/ts));
+  if((i1-i0+1)*(j1-j0+1)>150) return;
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){ const im=tile(B.url(z,i,j)); if(im.complete&&im.naturalWidth) ctx.drawImage(im,X0+i*ts,Y0+j*ts,ts+.5,ts+.5); }
+}
+$('f-base').onchange=e=>{ base=e.target.value; $('attr').textContent=BASES[base]?.attr||''; $('attr').hidden=!BASES[base]; draw(); };
+let vis=[];
+function draw(){
+  const dpr=devicePixelRatio||1; ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=css('--land'); ctx.fillRect(0,0,W,Hh);
+  ctx.globalAlpha=base==='esri'?1:.8; drawTiles(); ctx.globalAlpha=1;
+  ctx.save(); ctx.translate(t.x,t.y); ctx.scale(t.k,t.k);
+  const lw=1/t.k, line=d3.geoPath(proj,ctx), wrong=css('--wrong');
+  const [x0,y0]=t.invert([-10,-10]), [x1,y1]=t.invert([W+10,Hh+10]);
+  const lines=t.k>=4;     // zoomed out, most ways are shorter than a pixel: dots only
+  const w=Math.max(2.2,Math.min(5,1.6*Math.sqrt(t.k)))*lw;
+  for(const r of vis){
+    const b=r.bb; if(b[2]<x0||b[0]>x1||b[3]<y0||b[1]>y1) continue;
+    const c=col(pOf(r)), [x,y]=r.xy;
+    if(lines){ ctx.beginPath(); line({type:'LineString',coordinates:r.g}); ctx.strokeStyle=c; ctx.lineWidth=w; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(x,y,(lines?2.4:1.5)*lw,0,7); ctx.fillStyle=c; ctx.fill();
+    if(verdict(r)===false||modelRight(r)===false){ ctx.beginPath(); ctx.arc(x,y,(lines?3.4:2.4)*lw,0,7); ctx.strokeStyle=wrong; ctx.lineWidth=1.2*lw; ctx.stroke(); }
+  }
+  if(st.sel){ ctx.beginPath(); line({type:'LineString',coordinates:st.sel.g}); ctx.strokeStyle=css('--ink'); ctx.lineWidth=w+3*lw; ctx.globalAlpha=.9; ctx.stroke(); ctx.globalAlpha=1;
+    ctx.beginPath(); line({type:'LineString',coordinates:st.sel.g}); ctx.strokeStyle=col(pOf(st.sel)); ctx.lineWidth=w; ctx.stroke();
+    const [x,y]=st.sel.xy; ctx.beginPath(); ctx.arc(x,y,9*lw,0,7); ctx.strokeStyle=css('--ink'); ctx.lineWidth=2*lw; ctx.stroke(); }
+  ctx.restore();
+}
+const zoom=d3.zoom().scaleExtent([1,20000]).on('zoom',e=>{t=e.transform;draw();});
+const sel=d3.select(cv).call(zoom).on('dblclick.zoom',null);
+$('zin').onclick=()=>sel.transition().duration(250).call(zoom.scaleBy,2);
+$('zout').onclick=()=>sel.transition().duration(250).call(zoom.scaleBy,.5);
+$('zreset').onclick=()=>sel.transition().duration(300).call(zoom.transform,d3.zoomIdentity);
+cv.addEventListener('click',e=>{
+  const b=cv.getBoundingClientRect(); const [mx,my]=t.invert([e.clientX-b.left,e.clientY-b.top]);
+  let best=null,bd=Infinity;
+  const pad=30/t.k; for(const r of vis){ const b=r.bb; if(mx<b[0]-pad||mx>b[2]+pad||my<b[1]-pad||my>b[3]+pad) continue; for(let i=0;i<r.g.length;i++){ const [x,y]=proj(r.g[i]); const d=(x-mx)**2+(y-my)**2; if(d<bd){bd=d;best=r;} } }
+  if(best && Math.sqrt(bd)*t.k<30) choose(best,false);
+});
+function focus(r){
+  const [x,y]=proj(r.mid); const k=Math.max(t.k,600);
+  sel.transition().duration(450).call(zoom.transform,d3.zoomIdentity.translate(W/2-k*x,Hh/2-k*y).scale(k));
+}
+// card
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=p=>p==null?'—':p.toFixed(2);
+const meter=p=>p==null?'':`<span class="meter"><i style="width:${Math.round(p*100)}%;background:${col(p)}"></i></span>`;
+const dfmt=d=>d?`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`:'—';
+const SHEET=10, PX=128, SHOW=256;
+function choose(r,zoomTo){
+  st.sel=r; const [lon,lat]=r.mid; const v=verdict(r); const m=mine(r);
+  const im = r.im ? `<div class="thumb" role="img" aria-label="Esri crop of way ${r.id}" style="background-image:url(sheets/${r.im[0]}.jpg);background-size:${SHEET*SHOW}px ${SHEET*SHOW}px;background-position:-${(r.im[1]%SHEET)*SHOW}px -${Math.floor(r.im[1]/SHEET)*SHOW}px"></div><div class="thumbnote">30 × 30 m Esri patch at the middle of the way, road runs up.</div>` : `<div class="thumbnote">No Esri crop for this way.</div>`;
+  const res = r.y==null ? '<span class="chip new">untagged</span>' : (v ? '<span class="chip ok">agrees with OSM</span>' : '<span class="chip bad">disagrees with OSM</span>');
+  const dis = (!db||!canWrite) ? 'disabled' : '';
+  $('card').innerHTML = `
+    <h2>${esc(r.nm)||'Unnamed '+esc(r.k)} <span style="color:var(--muted);font:400 13px var(--mono)">way ${r.id}</span></h2>
+    <div>${im}</div>
+    <dl class="kv">
+      <dt>Class</dt><dd>${esc(r.k)}</dd>
+      <dt>OSM surface</dt><dd>${esc(r.sf)||'none'}${r.y!=null?` (${r.y?'paved':'unpaved'})`:''}</dd>
+      <dt>Esri model</dt><dd>${fmt(r.ps)}${meter(r.ps)}</dd>
+      ${r.pn!=null?`<dt>NAIP model</dt><dd>${fmt(r.pn)}${meter(r.pn)}</dd>`:''}
+      <dt>Result</dt><dd>${res}</dd>
+      <dt>Esri image</dt><dd>${dfmt(r.d)} · ${esc(r.src)||'?'} · z${r.z??'?'}</dd>
+      <dt>Middle point</dt><dd>${lat.toFixed(5)}, ${lon.toFixed(5)}</dd>
+    </dl>
+    <div class="links">
+      <a href="https://www.openstreetmap.org/way/${r.id}" target="_blank" rel="noopener">OSM way</a>
+      <a href="https://www.openstreetmap.org/edit?way=${r.id}" target="_blank" rel="noopener">Edit in iD</a>
+      <a href="https://www.arcgis.com/home/webmap/viewer.html?basemapUrl=https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer&center=${lon},${lat}&level=19" target="_blank" rel="noopener">Esri imagery</a>
+      <a href="https://www.google.com/maps/@?api=1&map_action=map&center=${lat},${lon}&zoom=19&basemap=satellite" target="_blank" rel="noopener">Google satellite</a>
+      <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}" target="_blank" rel="noopener">Street View</a>
+      <a href="https://www.mapillary.com/app/?lat=${lat}&lng=${lon}&z=17.5" target="_blank" rel="noopener">Mapillary</a>
+    </div>
+    <div class="verdict">
+      <span class="lbl">Your verdict</span>
+      <div class="vbtns" id="vbtns">
+        <button data-v="paved" aria-pressed="${m==='paved'}" ${dis}>Paved <kbd>P</kbd></button>
+        <button data-v="unpaved" aria-pressed="${m==='unpaved'}" ${dis}>Unpaved <kbd>U</kbd></button>
+        <button data-v="unsure" aria-pressed="${m==='unsure'}" ${dis}>Can't tell <kbd>X</kbd></button>
+        <button data-v="next">Next <kbd>N</kbd></button>
+      </div>
+      <span class="vnote" id="vnote">${!db?'Verdicts can’t be saved in this view.':!canWrite?'You can view verdicts but not save them.':m?'Saved. Click again to clear.':'Not checked yet.'}</span>
+    </div>`;
+  document.querySelectorAll('#tbl tbody tr').forEach(tr=>tr.classList.toggle('sel',tr.dataset.key===r.key));
+  if(zoomTo) focus(r); else draw();
+}
+$('card').addEventListener('click',e=>{const b=e.target.closest('#vbtns button'); if(!b||b.disabled) return; if(b.dataset.v==='next') next(); else mark(b.dataset.v);});
+let saving=false;
+async function mark(v){
+  const r=st.sel; if(!r||!db||!canWrite||saving) return;
+  saving=true; const ref=db.collection('checks').doc(r.key); const prev=mine(r);
+  try{
+    if(prev===v){ await ref.delete(); }
+    else { await ref.set({c:r.c, s:r.s, id:r.id, v, p_esri:r.ps, osm:r.sf??null, at:new Date().toISOString()}); }
+  }catch(e){
+    if(e&&e.code==='invalid_argument'){ canWrite=false; }
+    const n=$('vnote'); if(n) n.textContent = e&&e.code==='quota_exceeded' ? 'The store is full; verdict not saved.' : 'Could not save that verdict.';
+  }finally{ saving=false; }
+}
+function next(){
+  const list=$('tbl').querySelector('tbody')._list||[]; if(!list.length) return;
+  const i=st.sel?list.findIndex(r=>r.key===st.sel.key):-1;
+  for(let j=i+1;j<list.length;j++){ if(st.show==='unchecked'||!mine(list[j])){ choose(list[j],true); return; } }
+  if(i+1<list.length) choose(list[i+1],true);
+}
+document.addEventListener('keydown',e=>{
+  if(e.target.closest('input,select,textarea')||e.metaKey||e.ctrlKey||e.altKey) return;
+  const k=e.key.toLowerCase();
+  if(k==='n'){ next(); e.preventDefault(); }
+  else if(st.sel&&({p:'paved',u:'unpaved',x:'unsure'})[k]){ mark(({p:'paved',u:'unpaved',x:'unsure'})[k]); e.preventDefault(); }
+});
+// summary + table
+function pct(a,b){ return b?Math.round(100*a/b)+'%':'—'; }
+function summary(list){
+  const n=list.length, conf=list.filter(r=>pOf(r)>=.9||pOf(r)<=.1).length;
+  let s=`<span><b>${n}</b> roads</span><span><b>${pct(conf,n)}</b> confident (p ≥ 0.9 or ≤ 0.1)</span>`;
+  const lab=list.filter(r=>r.y!=null);
+  if(lab.length) s+=`<span><b>${pct(lab.filter(r=>verdict(r)).length,lab.length)}</b> agree with OSM tag</span>`;
+  const ch=list.filter(r=>mine(r)), judged=ch.filter(r=>modelRight(r)!=null);
+  s+=`<span><b>${ch.length}</b> checked by you</span>`;
+  if(judged.length) s+=`<span>model right on <b>${pct(judged.filter(r=>modelRight(r)).length,judged.length)}</b> of ${judged.length} you judged</span>`;
+  const osmJ=judged.filter(r=>r.y!=null);
+  if(osmJ.length) s+=`<span>OSM tag right on <b>${pct(osmJ.filter(r=>(r.y===1)===(mine(r)==='paved')).length,osmJ.length)}</b></span>`;
+  $('summary').innerHTML=s;
+}
+const keyf={id:r=>r.id,k:r=>r.k,nm:r=>r.nm||'~',sf:r=>r.sf||'~',p:r=>pOf(r),v:r=>verdict(r)===false?0:verdict(r)?2:1,m:r=>mine(r)||'~',d:r=>r.d||'',z:r=>r.z||0};
+function mcell(r){ const m=mine(r); if(!m) return '—'; const ok=modelRight(r); return m==='unsure'?'<span class="chip uns">can’t tell</span>':`<span class="chip ${ok?'ok':'bad'}">${m}</span>`; }
+function table(list){
+  const k=keyf[st.sortK]; list=[...list].sort((a,b)=>{const x=k(a),y=k(b);return (x<y?-1:x>y?1:0)*st.sortDir;});
+  const tb=document.querySelector('#tbl tbody');
+  tb.innerHTML=list.slice(0,st.limit).map(r=>{const v=verdict(r);return `<tr data-key="${r.key}" tabindex="0" class="${st.sel&&st.sel.key===r.key?'sel':''}"><td class="num">${r.id}</td><td>${esc(r.k)}</td><td class="nm">${esc(r.nm)}</td><td>${esc(r.sf)||'—'}</td><td class="num">${fmt(pOf(r))}${meter(pOf(r))}</td><td>${r.y==null?'<span class="chip new">new</span>':v?'<span class="chip ok">agrees</span>':'<span class="chip bad">disagrees</span>'}</td><td>${mcell(r)}</td><td class="num">${dfmt(r.d)}</td><td class="num">${r.z??'—'}</td></tr>`;}).join('');
+  const more=$('more'); more.hidden=list.length<=st.limit; more.textContent=`Show more (${list.length-st.limit} left)`;
+  tb._list=list;
+}
+const byKey=new Map(R.map(r=>[r.key,r]));
+document.querySelector('#tbl tbody').addEventListener('click',e=>{const tr=e.target.closest('tr'); if(!tr) return; const r=byKey.get(tr.dataset.key); if(r) choose(r,true);});
+document.querySelector('#tbl tbody').addEventListener('keydown',e=>{if(e.key==='Enter'){e.target.click();}});
+$('more').onclick=()=>{st.limit+=300; update();};
+document.querySelectorAll('#tbl th[data-k]').forEach(th=>{const go=()=>{const k=th.dataset.k; st.sortDir=st.sortK===k?-st.sortDir:1; st.sortK=k; update();}; th.onclick=go; th.onkeydown=e=>{if(e.key==='Enter')go();};});
+function update(){ vis=rows(); if(st.sel && !vis.includes(st.sel)) { st.sel=null; $('card').innerHTML='<p class="empty">Click a road to see its Esri crop, scores and links.</p>'; } summary(vis); table(vis); draw(); }
+size(); fit(); update();
+window.addEventListener('resize',()=>{size(); fit(); update();});
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',draw);
+
+// shared verdicts
+$('dbstatus').textContent='Loading saved verdicts…';
+db = await window.claude?.use?.('db').catch(()=>null) ?? null;
+if(!db){ $('dbstatus').textContent='Saved verdicts are not available in this view.'; if(st.sel) choose(st.sel,false); return; }
+try{ const user=await claude.use('user'); const w=user?.can?.('data.write'); if(w===false) canWrite=false; }catch(_){}
+const timer=setTimeout(()=>{$('dbstatus').textContent='Saved verdicts can’t be reached yet; showing what is loaded.';},10000);
+db.collection('checks').onSnapshot(snap=>{
+  if(!snap.metadata.fromCache){ clearTimeout(timer); }
+  checks.clear(); for(const d of snap.docs){ const x=d.data(); if(x&&x.v) checks.set(d.id,x); }
+  $('dbstatus').textContent=`${checks.size} verdicts saved on this page so far.`;
+  update(); if(st.sel) choose(st.sel,false);
+},err=>{ clearTimeout(timer); $('dbstatus').textContent='Saved verdicts stopped updating; reload to see new ones.'; });
+})();
+</script>

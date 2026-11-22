@@ -1,0 +1,36 @@
+diff --git a/rsc/artifacts/confusion_matrix_handler.py b/rsc/artifacts/confusion_matrix_handler.py
+index 3d01c40..c15e0af 100644
+--- a/rsc/artifacts/confusion_matrix_handler.py
++++ b/rsc/artifacts/confusion_matrix_handler.py
+@@ -78,6 +78,7 @@ class ConfusionMatrixHandler(ArtifactHandler):
+         # Generate and save the confusion matrix
+         c = ConfusionMatrixDisplay(confusion_matrix(y_true,
+                                                     y_pred,
++                                                    labels=range(len(self.labels)),
+                                                     normalize='true'),
+                                    display_labels=self.labels)
+         if self.simple:
+diff --git a/rsc/train/mcnn_loss.py b/rsc/train/mcnn_loss.py
+index b42d729..11055ea 100644
+--- a/rsc/train/mcnn_loss.py
++++ b/rsc/train/mcnn_loss.py
+@@ -7,6 +7,8 @@ import torch.nn.functional as functional
+ 
+ from .rsc_hxe_loss import RSCHXELoss
+ 
++_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
++
+ 
+ class MCNNLoss(nn.Module):
+     """ Combined MaskCNN loss function """
+@@ -15,8 +17,8 @@ class MCNNLoss(nn.Module):
+         super().__init__()
+ 
+         # Inputs
+-        self.top_lv_map = torch.IntTensor(top_lv_map).cuda()
+-        self.class_weights = torch.Tensor(class_weights).float().cuda()
++        self.top_lv_map = torch.IntTensor(top_lv_map).to(_DEVICE)
++        self.class_weights = torch.Tensor(class_weights).float().to(_DEVICE)
+         self.seg_k = seg_k
+         self.ob_k = ob_k
+ 
