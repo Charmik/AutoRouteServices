@@ -1,0 +1,7 @@
+# hz3 user unit (installed by AutoRouteServices/install_hz3_worker.sh): one ci-worker.sh sync, run by ci-worker-sync.timer.
+[Unit]
+Description=Freeze/thaw the hz3 worker to match CI
+
+[Service]
+Type=oneshot
+ExecStart=/home/charm/disk/autoroute-worker/ci-worker.sh sync

@@ -1,0 +1,25 @@
+# hz3 (CI box) user unit, installed as ~/.config/systemd/user/autoroute.service by install_hz3_worker.sh (needs linger).
+# Runs the prod jar with app-prod-hz3.properties: only OSMUpdaterTask + MapillarySightPhotosTask, writing to the
+# prod DB. It runs in user.slice, which has CPUWeight=1/IOWeight=1 against system.slice (the CI runners): all
+# 8 cores while CI is idle, ~1% while a job runs. During a job ci-worker.sh freezes this unit (its memory
+# stays in RAM). ParallelGC: only batch tasks run here, throughput matters, pauses don't.
+[Unit]
+Description=AutoRoute heavy-task worker (hz3, between CI jobs)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/charm/data/AutoRoute
+# hz3's root fs is 20 GB and nearly full: temp files go to the data disk
+Environment="TMPDIR=/home/charm/disk/tmp"
+Environment="JAVA_OPTIONS=-Xmx31g -XX:+UseParallelGC -XX:+UseCompactObjectHeaders -Djava.io.tmpdir=/home/charm/disk/tmp -Xlog:gc*:file=logs/gc.log:time,uptime:filecount=5,filesize=50m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/home/charm/disk/heapdumps -XX:-OmitStackTraceInFastThrow -XX:+ExitOnOutOfMemoryError"
+ExecStart=/usr/bin/java $JAVA_OPTIONS -jar AutoRoute.jar app.property.file=/home/charm/data/AutoRoute/app.properties
+ExecStop=/bin/kill -15 $MAINPID
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
