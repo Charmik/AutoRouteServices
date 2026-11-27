@@ -5,7 +5,8 @@
 --   * highway=steps are walkable but slow;
 --   * primary bridges and tunnels without a sidewalk are not walkable (a trunk is unroutable without
 --     explicit foot access anyway, as upstream);
---   * a traffic signal ADDS its penalty to the turn instead of overwriting it.
+--   * a traffic signal ADDS its penalty to the turn instead of overwriting it;
+--   * ferries are not walkable, as in the bike profiles.
 -- Preferences (heatmap, parks, water, big roads) are not here: they come from the per-segment
 -- traffic_final_walk.csv (TrafficDumpCsvTask / WalkCsvRates) applied by osrm-customize.
 
@@ -129,8 +130,9 @@ function setup()
       }
     },
 
+    -- RouteCycle: no ferries, see handle_ferry
     route_speeds = {
-      ferry = 5
+      ferry = 0
     },
 
     bridge_speeds = {
@@ -260,6 +262,15 @@ local function handle_big_road_bridge_tunnel(profile, way, result, data)
   return false
 end
 
+-- RouteCycle: a ferry is not part of a walk, the same ban as bike_common.lua. route_speeds.ferry = 0 alone is not
+-- enough: WayHandlers.ferries skips a zero speed and WayHandlers.speed then gives a foot=yes ferry the default walking
+-- speed. (Testing route 10543837 crossed the Thames on ferry way 282544341, route=ferry foot=yes.)
+local function handle_ferry(profile, way, result, data)
+  if data.route == 'ferry' then
+    return false
+  end
+end
+
 -- main entry point for processsing a way
 function process_way(profile, way, result)
   -- the intial filtering of ways based on presence of tags
@@ -298,6 +309,9 @@ function process_way(profile, way, result)
     -- set the default mode for this profile. if can be changed later
     -- in case it turns we're e.g. on a ferry
     WayHandlers.default_mode,
+
+    -- RouteCycle: no ferries
+    handle_ferry,
 
     -- check various tags that could indicate that the way is not
     -- routable. this includes things like status=impassable,
